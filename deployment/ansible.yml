@@ -11,7 +11,7 @@
     #- debug: msg="{{ slurpfile['content'] | b64decode }}"
     #- debug: msg="the value of foo.txt is {{ contents }}"
     - name: Get vault credentials
-      shell: "curl --location --request GET '{{ vaultAddress }} elevate-chat-bot-interface-service' --header 'X-Vault-Token: {{ slurpfile['content'] | b64decode }}' | jq '.data' > '{{ project_path }}/data2.json'"
+      shell: "curl --location --request GET '{{ vaultAddress }}elevate-chat-bot-interface-service' --header 'X-Vault-Token: {{ slurpfile['content'] | b64decode }}' | jq '.data' > '{{ project_path }}/data2.json'"
       register: credentials
     - debug: msg="{{ credentials }}"
 
