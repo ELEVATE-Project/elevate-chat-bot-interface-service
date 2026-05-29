@@ -39,7 +39,7 @@ app.get('/', (req, res) => {
     status: 'running',
     version: '1.0.0',
     endpoints: {
-      webhook: 'POST /webhook/whatsapp',
+      webhook: `POST ${process.env.BASE_ROUTE || "Not set"}`,
       mcp: 'POST /mcp/:toolName',
       health: 'GET /webhook/health'
     }
