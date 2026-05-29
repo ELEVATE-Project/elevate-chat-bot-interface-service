@@ -58,7 +58,7 @@ const startServer = async () => {
       Logger.info("Server started successfully", {
         port: config.port,
         environment: process.env.NODE_ENV || "development",
-        webhookUrl: `/webhook/whatsapp`,
+        webhookUrl: process.env.BASE_ROUTE,
         database: database.isConnected() ? "connected" : "disconnected",
         modelsLoaded: Object.keys(database.models),
       });
