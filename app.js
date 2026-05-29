@@ -27,7 +27,7 @@ app.use((req, res, next) => {
 // ============================================
 
 // Webhook routes (existing)
-app.use('/webhook', webhookRoutes);
+app.use(process.env.BASE_ROUTE || '/webhook', webhookRoutes);
 
 // MCP Service routes (new - for separate MCP server)
 app.use('/mcp', mcpRoutes);
