@@ -11,7 +11,9 @@ const Project = require("../database/models/project");
 const axios = require("axios");
 const storyPostSessionService = require("../services/storyPostSessionService");
 const languageService = require("../services/languageService");
-const MOHINI_BASE_URL =process.env.BACKEND_API_URL;
+const MOHINI_BASE_URL = process.env.BACKEND_API_URL;
+const { randomUUID } = require("crypto");
+
 class MessageController {
   /**
    * Main entry point for all WhatsApp messages.
@@ -108,11 +110,24 @@ class MessageController {
           phoneNumber,
           `❌ ${selectedLanguageText.notUnderstood}`,
         );
-
-        // Logger.info("MessageController: Natural language → NLP", { phoneNumber });
-        // return await this.handleNaturalLanguage(message, phoneNumber, messageText);
       }
+      // Ignore album header — individual images arrive as separate messages
+      if (message.type === "album") {
+        const expectedCount = message.album?.expectedImageCount || 0;
+        Logger.info("Album received", { phoneNumber, expectedCount });
 
+        // Store expected count in lastMessage context
+        const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+        const ctx = lastMsg?.context || {};
+        await usersQueries.updateLastMessage(phoneNumber, {
+          flow: "post_session_upload",
+          step: 2,
+          context: { ...ctx, expectedImageCount: expectedCount },
+          text: "album_start",
+        });
+
+        return { success: true, handled: true, route: "album-header" };
+      }
       // ──────────────────────────────────────────────────────────────
       // STEP 6: Media
       // ──────────────────────────────────────────────────────────────
@@ -141,20 +156,6 @@ class MessageController {
 
   // ──────────────────────────────────────────────────────────────────
   // STEP 0 impl: Auto-reconnect when server restarted
-  //
-  // Conditions to attempt a reconnect:
-  //   • scope.activeSession.sessionId exists in MongoDB   (session in flight)
-  //   • scope.wsSession.status !== "disconnected"         (not intentionally closed)
-  //     — OR — scope.wsSession is missing entirely        (first message after crash
-  //             where close handler never ran)
-  //
-  // After a clean WS close (network drop, etc.) the close handler sets
-  // status = "disconnected" AND sends the user a reconnect/new-session
-  // prompt. If the user replies with text instead of tapping a button we
-  // still auto-reconnect here so they're not left hanging.
-  //
-  // After a crash (SIGKILL / OOM) the close handler never runs, so
-  // wsSession.status is still "connected" → we reconnect unconditionally.
   // ──────────────────────────────────────────────────────────────────
   static async autoReconnectIfNeeded(phoneNumber) {
     try {
@@ -208,245 +209,302 @@ class MessageController {
   // ──────────────────────────────────────────────────────────────────
   // Forward message to the active Mohini WS session
   // ──────────────────────────────────────────────────────────────────
- static async forwardToActiveSession(message, phoneNumber) {
-  try {
-    const keys = [
-      "voiceProcessing",
-      "wsSessionRequired",
-      "audioDownloadError",
-      "notUnderstood",
-      "voiceHeard",
-      "voiceSendConfirm",
-      "voiceEditPrompt",
-      "voiceRetryPrompt",
-      "voiceSend",
-      "voiceEdit",
-      "voiceRetry",
-    ];
-    const selectedLanguageText = await languageService.tBatch(phoneNumber, keys);
-
-    // ── Voice / audio during an active session ───────────────────
-    if (message.type === "audio" || message.type === "voice") {
-      let audioUrl = message.audio?.link || message.voice?.link;
-      await whatsappService.sendMessage(
+  static async forwardToActiveSession(message, phoneNumber) {
+    try {
+      const keys = [
+        "voiceProcessing",
+        "wsSessionRequired",
+        "audioDownloadError",
+        "notUnderstood",
+        "voiceHeard",
+        "voiceSendConfirm",
+        "voiceEditPrompt",
+        "voiceRetryPrompt",
+        "voiceSend",
+        "voiceEdit",
+        "voiceRetry",
+      ];
+      const selectedLanguageText = await languageService.tBatch(
         phoneNumber,
-        `🎤 ${selectedLanguageText.voiceProcessing}`,
+        keys,
       );
 
-      // ── Download audio from WhatsApp ──────────────────────────
-      // const audioBuffer = await this.downloadWhatsAppAudio(message);
-      // if (!audioBuffer) {
-      //   await whatsappService.sendMessage(
-      //     phoneNumber,
-      //     `❌ ${selectedLanguageText.audioDownloadError}`,
-      //   );
-      //   return { success: false, handled: true, route: "ws-audio-failed" };
-      // }
+      // ── Voice / audio during an active session ───────────────────
+      if (message.type === "audio" || message.type === "voice") {
+        // let audioUrl = message.audio?.link || message.voice?.link;
+        const audioObj = message.audio || message.voice;
+        const audioId = audioObj?.id;
+        const audioMimeType = audioObj?.mime_type || "audio/mpeg";
 
-      // ── Get session context ───────────────────────────────────
-      const user = await usersQueries.findOne({ phoneNumber });
-      const session = user?.scope?.wsSession;
-
-      if (!session?.sessionId) {
-        Logger.warn("forwardToActiveSession: no wsSession found", { phoneNumber });
+        if (!audioId) {
+          await whatsappService.sendMessage(
+            phoneNumber,
+            `❌ ${selectedLanguageText.audioDownloadError}`,
+          );
+          return { success: false, handled: true, route: "ws-audio-failed" };
+        }
+          usersQueries.incrementAudioUsage(phoneNumber).catch((err) =>
+                  Logger.warn("Failed to increment audio usage", {
+                    phoneNumber,
+                    error: err.message,
+                  }),
+                );
         await whatsappService.sendMessage(
           phoneNumber,
-          `⚠️ ${selectedLanguageText.wsSessionRequired}`,
+          `🎤 ${selectedLanguageText.voiceProcessing}`,
         );
-        return { success: false, handled: true, route: "ws-no-session" };
-      }
 
-      const language = session?.language || user?.scope?.language || "en";
-      const flowName = session?.flowName || "guest-discussion";
+        // ── Download audio from WhatsApp ──────────────────────────
+        // const audioBuffer = await this.downloadWhatsAppAudio(message);
+        // if (!audioBuffer) {
+        //   await whatsappService.sendMessage(
+        //     phoneNumber,
+        //     `❌ ${selectedLanguageText.audioDownloadError}`,
+        //   );
+        //   return { success: false, handled: true, route: "ws-audio-failed" };
+        // }
 
-      // ── Transcribe ────────────────────────────────────────────
-      const transcript = await this._transcribeAudio(
-        phoneNumber,
-        audioUrl,
-        session.sessionId,
-        language,
-        flowName,
-      );
+        // ── Get session context ───────────────────────────────────
+        const user = await usersQueries.findOne({ phoneNumber });
+        const session = user?.scope?.wsSession;
 
-      if (!transcript) {
-        await whatsappService.sendMessage(
-          phoneNumber,
-          `❌ ${selectedLanguageText.notUnderstood}`,
-        );
-        return { success: false, handled: true, route: "ws-transcription-failed" };
-      }
-
-      // ── Store transcript, ask user to confirm ─────────────────
-      await usersQueries.updateLastMessage(phoneNumber, {
-        flow: "voice_confirm",
-        context: { pendingText: transcript, sessionActive: true },
-        text: "voice_transcribed",
-      });
-
-      await whatsappService.sendInteractiveMessage({
-        to: phoneNumber,
-        type: "button",
-        body: {
-          text: `🎤 *${selectedLanguageText.voiceHeard}*\n\n_"${transcript}"_\n\n${selectedLanguageText.voiceSendConfirm}`,
-        },
-        action: {
-          buttons: [
-            { type: "quick_reply", title: selectedLanguageText.voiceSend,  id: "voice_send"  },
-            { type: "quick_reply", title: selectedLanguageText.voiceEdit,  id: "voice_edit"  },
-            { type: "quick_reply", title: selectedLanguageText.voiceRetry, id: "voice_retry" },
-          ],
-        },
-      });
-
-      return { success: true, handled: true, route: "ws-voice-pending-confirm" };
-    }
-
-    // ── Text during an active session ─────────────────────────────
-    if (message.type === "text") {
-      const text = message.text?.body?.trim() || "";
-
-      // ── Cancel / exit keywords ────────────────────────────────
-      if (/^(cancel|exit|stop|quit|menu)$/i.test(text)) {
-        Logger.info("MessageController: Cancel inside WS session", { phoneNumber });
-        const result = await flowRouter.route(message);
-        return { ...result, route: "flowrouter-cancel-in-session" };
-      }
-
-      // ── User is editing a voice transcription ─────────────────
-      const lastMsg = await usersQueries.getLastMessage(phoneNumber);
-      if (lastMsg?.flow === "voice_edit") {
-        Logger.info("MessageController: Voice edit text received – forwarding to WS", {
-          phoneNumber,
-          text,
-        });
-
-        const sent = sessionService.sendMessage(phoneNumber, text);
-
-        await usersQueries.updateLastMessage(phoneNumber, {
-          flow: null,
-          context: {},
-          text: "voice_edit_sent",
-        });
-
-        if (!sent) {
-          Logger.warn("MessageController: WS send failed during voice edit", { phoneNumber });
-          const result = await flowRouter.route(message);
-          return { ...result, route: "flowrouter-voice-edit-fallback" };
+        if (!session?.sessionId) {
+          Logger.warn("forwardToActiveSession: no wsSession found", {
+            phoneNumber,
+          });
+          await whatsappService.sendMessage(
+            phoneNumber,
+            `⚠️ ${selectedLanguageText.wsSessionRequired}`,
+          );
+          return { success: false, handled: true, route: "ws-no-session" };
         }
 
-        Logger.info("MessageController: Voice edit forwarded to Mohini WS", { phoneNumber });
-        return { success: true, handled: true, route: "ws-voice-edit-forwarded" };
+        const language = session?.language || user?.scope?.language || "en";
+        const flowName = session?.flowName || "guest-discussion";
+
+        // ── Transcribe ────────────────────────────────────────────
+        const transcript = await this._transcribeAudio(
+          phoneNumber,
+          audioId,
+          audioMimeType,
+          session.sessionId,
+          language,
+          flowName,
+        );
+
+        if (!transcript) {
+          await whatsappService.sendMessage(
+            phoneNumber,
+            `❌ ${selectedLanguageText.notUnderstood}`,
+          );
+          return {
+            success: false,
+            handled: true,
+            route: "ws-transcription-failed",
+          };
+        }
+
+        // ── Store transcript, ask user to confirm ─────────────────
+        await usersQueries.updateLastMessage(phoneNumber, {
+          flow: "voice_confirm",
+          context: { pendingText: transcript, sessionActive: true },
+          text: "voice_transcribed",
+        });
+
+        await whatsappService.sendInteractiveMessage({
+          to: phoneNumber,
+          type: "button",
+          body: {
+            text: `🎤 *${selectedLanguageText.voiceHeard}*\n\n_"${transcript}"_\n\n${selectedLanguageText.voiceSendConfirm}`,
+          },
+          action: {
+            buttons: [
+              {
+                type: "quick_reply",
+                title: selectedLanguageText.voiceSend,
+                id: "voice_send",
+              },
+              {
+                type: "quick_reply",
+                title: selectedLanguageText.voiceEdit,
+                id: "voice_edit",
+              },
+              {
+                type: "quick_reply",
+                title: selectedLanguageText.voiceRetry,
+                id: "voice_retry",
+              },
+            ],
+          },
+        });
+
+        return {
+          success: true,
+          handled: true,
+          route: "ws-voice-pending-confirm",
+        };
       }
 
-      // ── Normal text forward ───────────────────────────────────
-      const sent = sessionService.sendMessage(phoneNumber, text);
-      if (!sent) {
-        // WS dropped between isConnected() check and here – fall back to flowRouter
-        Logger.warn("MessageController: WS send failed – falling back", { phoneNumber });
-        const result = await flowRouter.route(message);
-        return { ...result, route: "flowrouter-ws-fallback" };
+      // ── Text during an active session ─────────────────────────────
+      if (message.type === "text") {
+        const text = message.text?.body?.trim() || "";
+
+        // ── Cancel / exit keywords ────────────────────────────────
+        if (/^(cancel|exit|stop|quit|menu)$/i.test(text)) {
+          Logger.info("MessageController: Cancel inside WS session", {
+            phoneNumber,
+          });
+          const result = await flowRouter.route(message);
+          return { ...result, route: "flowrouter-cancel-in-session" };
+        }
+
+        // ── User is editing a voice transcription ─────────────────
+        const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+        if (lastMsg?.flow === "voice_edit") {
+          Logger.info(
+            "MessageController: Voice edit text received – forwarding to WS",
+            {
+              phoneNumber,
+              text,
+            },
+          );
+
+          const sent = sessionService.sendMessage(phoneNumber, text);
+
+          await usersQueries.updateLastMessage(phoneNumber, {
+            flow: null,
+            context: {},
+            text: "voice_edit_sent",
+          });
+
+          if (!sent) {
+            Logger.warn("MessageController: WS send failed during voice edit", {
+              phoneNumber,
+            });
+            const result = await flowRouter.route(message);
+            return { ...result, route: "flowrouter-voice-edit-fallback" };
+          }
+
+          Logger.info("MessageController: Voice edit forwarded to Mohini WS", {
+            phoneNumber,
+          });
+          return {
+            success: true,
+            handled: true,
+            route: "ws-voice-edit-forwarded",
+          };
+        }
+
+        // ── Normal text forward ───────────────────────────────────
+        const sent = sessionService.sendMessage(phoneNumber, text);
+        if (!sent) {
+          // WS dropped between isConnected() check and here – fall back to flowRouter
+          Logger.warn("MessageController: WS send failed – falling back", {
+            phoneNumber,
+          });
+          const result = await flowRouter.route(message);
+          return { ...result, route: "flowrouter-ws-fallback" };
+        }
+
+        Logger.info("MessageController: Text forwarded to Mohini WS", {
+          phoneNumber,
+        });
+        return { success: true, handled: true, route: "ws-text-forwarded" };
       }
 
-      Logger.info("MessageController: Text forwarded to Mohini WS", { phoneNumber });
-      return { success: true, handled: true, route: "ws-text-forwarded" };
+      // ── Anything else (image/doc) during a session ────────────────
+      await whatsappService.sendMessage(
+        phoneNumber,
+        `⚠️ ${selectedLanguageText.wsSessionRequired}`,
+      );
+      return { success: true, handled: true, route: "ws-unsupported-type" };
+    } catch (error) {
+      Logger.error("MessageController: forwardToActiveSession error", error);
+      return { success: false, handled: true, error: error.message };
     }
-
-    // ── Anything else (image/doc) during a session ────────────────
-    await whatsappService.sendMessage(
-      phoneNumber,
-      `⚠️ ${selectedLanguageText.wsSessionRequired}`,
-    );
-    return { success: true, handled: true, route: "ws-unsupported-type" };
-
-  } catch (error) {
-    Logger.error("MessageController: forwardToActiveSession error", error);
-    return { success: false, handled: true, error: error.message };
   }
-}
+
 
   static async _transcribeAudio(
     phoneNumber,
-    audioUrl,
+    audioId,
+    audioMimeType,
     sessionId,
-    language = "en",
-    flowName = "guest-discussion",
+    language,
+    flowName,
   ) {
     try {
-      // ── 1. Get presigned URL ─────────────────────────────────────
-      // const fileName = `${Date.now()}`;
-      // const fileType = "audio/ogg;codecs=opus"; // WhatsApp sends ogg
-      // const folder_structure = `chatbot/companychat/${sessionId}/`;
+      // ── Step 1: Download binary from Whapi ──────────────────────
+      const response = await whatsappService.getMedia(audioId);
+      const buffer = Buffer.from(response.data);
 
-      // const presignResp = await axios.post(
-      //   `${MOHINI_BASE_URL}/api/get-presigned-url/`,
-      //   { fileName, fileType, folder_structure },
-      //   {
-      //     headers: {
-      //       "Content-Type": "application/json",
-      //       Origin: process.env.ORIGIN_URL,
-      //     },
-      //     timeout: 15000,
-      //   },
-      // );
+      if (!buffer.length) {
+        Logger.error("Empty audio buffer", { phoneNumber, audioId });
+        return null;
+      }
 
-      // const { uploadUrl, s3Url } = presignResp.data;
-      // if (!uploadUrl || !s3Url) {
-      //   Logger.error("_transcribeAudio: no uploadUrl/s3Url", {
-      //     presignResp: presignResp.data,
-      //   });
-      //   return null;
-      // }
+      // ── Step 2: Get presigned URL for audio ──────────────────────
+      const ext = (audioMimeType.split("/")[1] || "mp3").split(";")[0].trim();
+      const fileName = `${Date.now()}_${randomUUID().slice(0, 8)}.${ext}`;
 
-      // ── 2. Upload audio buffer to S3 ─────────────────────────────
-      // await axios.put(uploadUrl, audioBuffer, {
-      //   headers: {
-      //     "Content-Type": fileType,
-      //     "Content-Length": audioBuffer.length,
-      //   },
-      //   timeout: 60000,
-      //   maxBodyLength: Infinity,
-      //   maxContentLength: Infinity,
-      // });
+      const presigned = await storyPostSessionService._getPresignedUrl(
+        phoneNumber,
+        {
+          fileName,
+          fileType: audioMimeType,
+          storyId: null, // audio doesn't need storyId
+          folder_structure: `chatbot/companychat/${sessionId}`, // use a generic folder for audio uploads
+        },
+      );
 
-      Logger.info("_transcribeAudio: audio uploaded to S3", { audioUrl });
+      if (!presigned) {
+        Logger.error("Failed to get presigned URL for audio", { phoneNumber });
+        return null;
+      }
 
-      // ── 3. Call ASR API ──────────────────────────────────────────
+      // ── Step 3: PUT to S3 ────────────────────────────────────────
+      await axios.put(presigned.uploadUrl, buffer, {
+        headers: {
+          "Content-Type": audioMimeType,
+          "Content-Length": buffer.length,
+        },
+        timeout: 60000,
+        maxBodyLength: Infinity,
+      });
+
+      const parsed = new URL(presigned.uploadUrl);
+      const s3AudioUrl = `s3://${parsed.host}${parsed.pathname}`;
+
+      // ── Step 4: Call ASR API ─────────────────────────────────────
       const asrResp = await axios.post(
         `${MOHINI_BASE_URL}/api/asr/`,
         {
-           s3Url:audioUrl, 
+          s3Url: presigned.s3Url,
           source_language: language,
-          route: `/${flowName}`,
+          route: process.env.MOHINI_CAPTURE_BOT_ROUTE,
         },
         {
           headers: {
             "Content-Type": "application/json",
             Origin: process.env.ORIGIN_URL,
+            Referer: `${process.env.ORIGIN_URL}/`,
           },
           timeout: 30000,
         },
       );
 
-      const transcript = asrResp.data?.transcript?.trim();
-      Logger.info("_transcribeAudio: transcript received", {
-        phoneNumber,
-        transcript,
-      });
+      const transcript = asrResp.data?.transcript || asrResp.data?.text;
+      Logger.info("Transcription complete", { phoneNumber, transcript });
       return transcript || null;
     } catch (error) {
       Logger.error("_transcribeAudio failed", {
         phoneNumber,
         error: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
       });
       return null;
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────
-  // Check if message is interactive (buttons / lists)
-  // ──────────────────────────────────────────────────────────────────
   static isInteractiveMessage(message) {
     return !!(
       message?.interactive?.buttons_reply?.id ||
@@ -462,7 +520,7 @@ class MessageController {
   // Simple keyword commands that don't need AI
   // ──────────────────────────────────────────────────────────────────
   static isSimpleCommand(text) {
-    return /^(projects|help|menu|cancel|exit|stop|quit|done|finish|complete|next|mainmenu|hi|hello)$/i.test(
+    return /^(projects|help|menu|cancel|exit|stop|quit|done|finish|complete|start|hey|hi|hello)$/i.test(
       text,
     );
   }

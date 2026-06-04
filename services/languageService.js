@@ -132,12 +132,12 @@ async tBatch(phoneNumber, keys) {
   // 6. Build the language-selection interactive message
   //    (used before any translations are loaded)
   // ─────────────────────────────────────────
-  buildLanguageSelectionMessage(to) {
+  buildLanguageSelectionMessage(to,message="") {
     return {
       to,
       type: "button",
       body: {
-        text: "👋 Welcome to *Mitra *!\n\nPlease select your language:\nकृपया अपनी भाषा चुनें:\nದಯವಿಟ್ಟು ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆ ಮಾಡಿ:",
+        text: `${message !=="" ? message :"👋 Welcome to *Mitra *!"} \n\nPlease select your language:\nकृपया अपनी भाषा चुनें:\nದಯವಿಟ್ಟು ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆ ಮಾಡಿ`,
       },
       action: {
         buttons: [
@@ -154,11 +154,12 @@ async tBatch(phoneNumber, keys) {
   // 7. Build the post-language main-menu message using stored translation keys
   //    Keys used: commonPageSelectionText, commonPageButtonText1, commonPageButtonText2
   // ─────────────────────────────────────────
-  async buildMainMenuMessage(phoneNumber) {
+  async buildMainMenuMessage(phoneNumber,message) {
     const keys = [
       "commonPageSelectionText",
       "commonPageButtonText1",
       "commonPageButtonText2",
+      "changeLanguageButton"
     ];
     const tx = await this.tBatch(phoneNumber, keys);
 
@@ -166,19 +167,24 @@ async tBatch(phoneNumber, keys) {
       to: phoneNumber,
       type: "button",
       body: {
-        text: tx.commonPageSelectionText || "What would you like to do today?",
+        text: message ? message:`🌟 ${tx.commonPageSelectionText}` || "🌟 What would you like to do today?",
       },
       action: {
         buttons: [
           {
             type: "quick_reply",
-            title: tx.commonPageButtonText2 || "Capture Discussion",
+            title: `🗣️ ${tx.commonPageButtonText2}` || "Capture Discussion",
             id: "capture_discussion",
           },
           {
             type: "quick_reply",
-            title: tx.commonPageButtonText1 || "Record Story",
+            title: `📖 ${tx.commonPageButtonText1}` || "Record Story",
             id: "record_story",
+          },
+           {
+            type: "quick_reply",
+            title: `${tx.changeLanguageButton}` || "Change Language",
+            id: "change_language",
           },
         ],
       },

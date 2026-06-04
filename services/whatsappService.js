@@ -218,6 +218,18 @@ class WhatsAppService {
     Logger.warn("sendTyping failed", { phoneNumber, error: error.message });
   }
 }
+
+async getMedia(mediaId) {
+  const response = await axios.get(
+    `${this.baseUrl}/media/${mediaId}`,
+    {
+      headers: { Authorization: `Bearer ${this.token}` },
+      responseType: "arraybuffer", // ← critical
+      timeout: 30000,
+    }
+  );
+  return response;
+}
 }
 
 module.exports = new WhatsAppService();
