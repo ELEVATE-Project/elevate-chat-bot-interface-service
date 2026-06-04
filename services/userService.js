@@ -67,7 +67,7 @@ class UserService {
   //   Step 3 – User, language set      → show translated main menu
   //   Step 4 – Active WS session       → forward to sessionService
   // ─────────────────────────────────────────
-  async handleUserMessage(message) {
+  async handleUserMessage(message, selectedAction = "") {
     try {
       const phoneNumber = message.from;
       const senderName = message.pushName || message.from_name || "Friend";
@@ -76,7 +76,7 @@ class UserService {
       // ── STEP 1 & 2: Check existence ──────────────────────────
       const userCheck = await this.checkUserExists(phoneNumber);
 
-      if (!userCheck.success) {
+      if (!userCheck.success && phoneNumber) {
         // Brand-new user – create skeleton then ask for language
         Logger.info("New user – creating record", { phoneNumber });
         await this.createUser(phoneNumber, senderName, messageText);
@@ -86,7 +86,8 @@ class UserService {
         //   `👋 Hi *${senderName}*, welcome to *Mitra Bot*!`
         // );
 
-        const langMsg = languageService.buildLanguageSelectionMessage(phoneNumber);
+        const langMsg =
+          languageService.buildLanguageSelectionMessage(phoneNumber);
         await whatsappService.sendInteractiveMessage(langMsg);
 
         return { success: true, handled: true, stage: "language_selection" };
@@ -95,10 +96,16 @@ class UserService {
       const user = userCheck.data;
 
       // ── STEP 2: Existing user but no language chosen ──────────
-      if (!user.scope?.language) {
-        Logger.info("User has no language – prompting selection", { phoneNumber });
-
-        const langMsg = languageService.buildLanguageSelectionMessage(phoneNumber);
+      if (!user.scope?.language || selectedAction === "change_language") {
+        Logger.info("User has no language – prompting selection", {
+          phoneNumber,
+        });
+        const langMsg = languageService.buildLanguageSelectionMessage(
+          phoneNumber,
+          selectedAction === "change_language"
+            ? "🔄 Want to continue in a different language?\n"
+            : "",
+        );
         await whatsappService.sendInteractiveMessage(langMsg);
 
         return { success: true, handled: true, stage: "language_selection" };
@@ -111,8 +118,22 @@ class UserService {
       });
 
       await usersQueries.clearLastMessage(phoneNumber);
+      let mainMenuMsg;
+      if (selectedAction === "yes_new_session") {
+        const keys = ["newSessionStarted"];
+        const selectedLanguageText = await languageService.tBatch(
+          phoneNumber,
+          keys,
+        );
 
-      const mainMenuMsg = await languageService.buildMainMenuMessage(phoneNumber);
+        mainMenuMsg = await languageService.buildMainMenuMessage(
+          phoneNumber,
+          selectedLanguageText.newSessionStarted ||
+            "✅ Starting a new session! What would you like to do?",
+        );
+      } else {
+        mainMenuMsg = await languageService.buildMainMenuMessage(phoneNumber);
+      }
       await whatsappService.sendInteractiveMessage(mainMenuMsg);
 
       return { success: true, handled: true, stage: "main_menu" };
@@ -121,7 +142,7 @@ class UserService {
       try {
         await whatsappService.sendMessage(
           message.from,
-          "❌ Something went wrong. Please try again."
+          "❌ Something went wrong. Please try again.",
         );
       } catch (_) {}
       return { success: false, handled: true, error: error.message };
@@ -146,7 +167,7 @@ class UserService {
       return await usersQueries.update(
         { phoneNumber },
         { $set: updateData },
-        { new: true }
+        { new: true },
       );
     } catch (error) {
       Logger.error("Failed to update user", error);

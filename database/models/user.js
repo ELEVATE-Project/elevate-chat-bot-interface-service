@@ -12,7 +12,6 @@ const usersSchema = new Schema(
       required: true,
       unique: true,
       trim: true,
-      index: true,
     },
 
     name: {
@@ -37,8 +36,11 @@ const usersSchema = new Schema(
       text: { type: String },
       flow: { type: String }, // e.g. "update_project", "registration"
       step: { type: Number, default: 0 },
-      context: { type: Object, default: {} },
+      context: { type: Object, default: {
+
+      } },
       updatedAt: { type: Date, default: Date.now },
+      uploadCount: { type: Number, default: 0 }
     },
 
     scope: {
@@ -109,8 +111,12 @@ const usersSchema = new Schema(
         udise: null,
       },
     },
-
     isRegistered: { type: Boolean, default: false },
+       metrics: {
+     
+      audioUsageCount: { type: Number, default: 0 },
+      reportDownloadCount: { type: Number, default: 0 },
+      },
   },
   {
     timestamps: true,

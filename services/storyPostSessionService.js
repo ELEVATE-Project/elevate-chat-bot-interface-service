@@ -1,7 +1,6 @@
 // ============================================
 // FILE: services/storyPostSessionService.js
 
-
 const axios = require("axios");
 const Logger = require("../utils/logger");
 const usersQueries = require("../database/databaseQueries/userQueries");
@@ -10,13 +9,13 @@ const languageService = require("./languageService");
 const fs = require("fs").promises;
 const path = require("path");
 const { randomUUID } = require("crypto");
-
+const uploadDoneTimers = new Map();
 const {
   makeApiRequest,
   downloadBinaryFile,
 } = require("../generics/services/axios");
 
-const MOHINI_BASE_URL =process.env.BACKEND_API_URL ;
+const MOHINI_BASE_URL = process.env.BACKEND_API_URL;
 
 const MAX_PHOTOS = 10;
 
@@ -64,7 +63,7 @@ class StoryPostSessionService {
       // we guard here too so direct calls (e.g. session_end message)
       // don't bypass the check accidentally.
       whatsappService.sendTyping(phoneNumber);
-      
+
       const sessionService = require("./sessionService");
       const isCompleted = await sessionService.checkSessionCompleted(
         session.sessionId,
@@ -130,6 +129,217 @@ class StoryPostSessionService {
   // ─────────────────────────────────────────────────────────────────
   // 2.  Handle an incoming WhatsApp image during post_session_upload
   // ─────────────────────────────────────────────────────────────────
+  // async handlePhotoUpload(phoneNumber, message) {
+  //   try {
+  //     const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+  //     const ctx = lastMsg?.context || {};
+
+  //     const mediaType = message.type; // "image", "document", "video", "audio"
+  //     const mediaId = message[mediaType]?.id;
+  //     // let mediaUrl = message[mediaType]?.link;
+
+  //     // if (!mediaUrl && mediaId) {
+  //     //   mediaUrl = await whatsappService.getMediaUrl(mediaId);
+  //     // }
+  //     const mimeType =
+  //       message[mediaType]?.mime_type || "application/octet-stream";
+  //     const keys = [
+  //       "maxPhotosWarning",
+  //       "doneMessage",
+  //       "imageDownloadError",
+  //       "storyDownloadError",
+  //       "imageUploadSuccess",
+  //       "remainingPhotos",
+  //       "completedStatusText",
+  //       "addMorePhotos",
+  //       "reportGenerationMessage",
+  //     ];
+  //     const selectedLanguageText = await languageService.tBatch(
+  //       phoneNumber,
+  //       keys,
+  //     );
+  //     if (ctx.uploadCount >= MAX_PHOTOS) {
+  //       await whatsappService.sendMessage(
+  //         phoneNumber,
+  //         `⚠️ ${selectedLanguageText.maxPhotosWarning}  ` +
+  //           `${selectedLanguageText.doneMessage}`,
+  //       );
+  //       return { success: false, handled: true };
+  //     }
+
+  //     Logger.info("Uploading photo", {
+  //       phoneNumber,
+  //       uploadCount: ctx.uploadCount,
+  //       storyId: ctx.storyId,
+  //     });
+
+  //     const uniqueId = randomUUID().slice(0, 8);
+  //     const fileName = `${Date.now()}_${uniqueId}.${this.getFileExtension(mediaType)}`;
+  //     // ── Step 1: Download image from WhatsApp ─────────────────────
+  //     const downloadedFile = await this._downloadWhatsAppImage(
+  //       mediaId,
+  //       fileName,
+  //     );
+  //     const { buffer, filePath } = downloadedFile;
+  //     if (!buffer) {
+  //       await whatsappService.sendMessage(
+  //         phoneNumber,
+  //         `❌ ${selectedLanguageText.imageDownloadError}`,
+  //       );
+  //       return { success: false, handled: true };
+  //     }
+
+  //     // ── Step 2: Fetch storyId if we don't have it yet ────────────
+  //     let storyId = ctx.storyId;
+  //     if (!storyId) {
+  //       storyId = await this._fetchStoryId(phoneNumber, ctx.sessionId);
+
+  //       if (!storyId) {
+  //         await whatsappService.sendMessage(
+  //           phoneNumber,
+  //           `❌ ${selectedLanguageText.storyDownloadError}`,
+  //         );
+  //         return { success: false, handled: true };
+  //       }
+  //       await usersQueries.updateLastMessage(phoneNumber, {
+  //         context: { ...ctx, storyId },
+  //       });
+  //     }
+
+  //     // ── Step 3: Get presigned URL ────────────────────────────────
+  //     const presigned = await this._getPresignedUrl(phoneNumber, {
+  //       fileName,
+  //       fileType: mimeType,
+  //       storyId,
+  //       folder_structure: "chatbot/storymedia/",
+  //     });
+
+  //     if (!presigned) {
+  //       await whatsappService.sendMessage(
+  //         phoneNumber,
+  //         `❌ ${selectedLanguageText.imageDownloadError}`,
+  //       );
+  //       return { success: false, handled: true };
+  //     }
+
+  //     // ── Step 4: PUT to S3 ────────────────────────────────────────
+  //     const s3Url = await this._uploadToS3(
+  //       presigned.uploadUrl,
+  //       buffer,
+  //       mimeType,
+  //       fileName,
+  //     );
+  //     if (!s3Url) {
+  //       await whatsappService.sendMessage(
+  //         phoneNumber,
+  //         `❌ ${selectedLanguageText.imageDownloadError}`,
+  //       );
+  //       return { success: false, handled: true };
+  //     }
+
+  //     // ── Step 5: Register with storymedia API ─────────────────────
+  //     await this._registerStorymedia(phoneNumber, {
+  //       file_url: presigned.s3Url,
+  //       storyId,
+  //       fileName,
+  //       mimeType,
+  //       sessionId: ctx.sessionId,
+  //       flowName: ctx.flowName,
+  //     });
+
+  //     // ── Step 6: Update upload count in context ───────────────────
+  //     const newCount = await usersQueries.incrementUploadCount(phoneNumber);
+  //     await usersQueries.updateLastMessage(phoneNumber, {
+  //       flow: "post_session_upload",
+  //       step: 2,
+  //       context: { ...ctx, storyId, uploadCount: newCount },
+  //       text: "photo_uploaded",
+  //     });
+
+  //     Logger.info("Photo uploaded successfully", {
+  //       phoneNumber,
+  //       uploadCount: newCount,
+  //       storyId,
+  //     });
+
+  //     // ── Delete temp file after successful S3 upload ──────────────
+  //     if (filePath) {
+  //       fs.unlink(filePath).catch((err) =>
+  //         Logger.warn("Failed to delete temp file", {
+  //           filePath,
+  //           error: err.message,
+  //         }),
+  //       );
+  //     }
+
+  //     // ── Step 7: Acknowledge and ask for more / offer to finish ───
+  //     // ── Step 7: Acknowledge upload, debounce the "done" trigger ─────
+  //     const remaining = MAX_PHOTOS - newCount;
+
+  //     await whatsappService.sendMessage(
+  //       phoneNumber,
+  //       `✅ ${newCount}/${MAX_PHOTOS} ${selectedLanguageText.imageUploadSuccess}`,
+  //     );
+
+  //     if (remaining <= 0) {
+  //       // Hit the limit — trigger immediately, no need to wait
+  //       if (uploadDoneTimers.has(phoneNumber)) {
+  //         clearTimeout(uploadDoneTimers.get(phoneNumber));
+  //         uploadDoneTimers.delete(phoneNumber);
+  //       }
+  //       await whatsappService.sendMessage(
+  //         phoneNumber,
+  //         `✅ ${selectedLanguageText.reportGenerationMessage}`,
+  //       );
+  //       await this.handleUploadDone(phoneNumber);
+  //     } else {
+  //       // More uploads may be coming — wait 3s before calling done
+  //       // scheduleUploadDone(
+  //       //   phoneNumber,
+  //       //   async () => {
+  //       //     await whatsappService.sendMessage(
+  //       //       phoneNumber,
+  //       //       `✅ ${selectedLanguageText.reportGenerationMessage}`,
+  //       //     );
+  //       //     await this.handleUploadDone(phoneNumber);
+  //       //   },
+  //       //   3000,
+  //       // );
+  //       const self = this;
+  //       const langText = selectedLanguageText; // capture before async gap
+  //       scheduleUploadDone(
+  //         phoneNumber,
+  //         async () => {
+  //           await whatsappService.sendMessage(
+  //             phoneNumber,
+  //             `✅ ${langText.reportGenerationMessage}`,
+  //           );
+  //           await self.handleUploadDone(phoneNumber);
+  //         },
+  //         3000,
+  //       );
+  //     }
+
+  //     return { success: true, handled: true };
+  //   } catch (error) {
+  //     Logger.error("handlePhotoUpload error", {
+  //       phoneNumber,
+  //       error: error.message,
+  //     });
+
+  //     const keys = ["imageDownloadError"];
+  //     const selectedLanguageText = await languageService.tBatch(
+  //       phoneNumber,
+  //       keys,
+  //     );
+  //     await whatsappService.sendMessage(
+  //       phoneNumber,
+  //       `❌ ${selectedLanguageText.imageDownloadError}`,
+  //     );
+  //     return { success: false, handled: true };
+  //   }
+  // }
+
   async handlePhotoUpload(phoneNumber, message) {
     try {
       const lastMsg = await usersQueries.getLastMessage(phoneNumber);
@@ -137,7 +347,11 @@ class StoryPostSessionService {
 
       const mediaType = message.type; // "image", "document", "video", "audio"
       const mediaId = message[mediaType]?.id;
-      const mediaUrl = message[mediaType]?.link;
+      // let mediaUrl = message[mediaType]?.link;
+
+      // if (!mediaUrl && mediaId) {
+      //   mediaUrl = await whatsappService.getMediaUrl(mediaId);
+      // }
       const mimeType =
         message[mediaType]?.mime_type || "application/octet-stream";
       const keys = [
@@ -171,11 +385,10 @@ class StoryPostSessionService {
       });
 
       const uniqueId = randomUUID().slice(0, 8);
-
       const fileName = `${Date.now()}_${uniqueId}.${this.getFileExtension(mediaType)}`;
       // ── Step 1: Download image from WhatsApp ─────────────────────
       const downloadedFile = await this._downloadWhatsAppImage(
-        mediaUrl,
+        mediaId,
         fileName,
       );
       const { buffer, filePath } = downloadedFile;
@@ -191,6 +404,7 @@ class StoryPostSessionService {
       let storyId = ctx.storyId;
       if (!storyId) {
         storyId = await this._fetchStoryId(phoneNumber, ctx.sessionId);
+
         if (!storyId) {
           await whatsappService.sendMessage(
             phoneNumber,
@@ -198,6 +412,9 @@ class StoryPostSessionService {
           );
           return { success: false, handled: true };
         }
+        await usersQueries.updateLastMessage(phoneNumber, {
+          context: { ...ctx, storyId },
+        });
       }
 
       // ── Step 3: Get presigned URL ────────────────────────────────
@@ -233,7 +450,7 @@ class StoryPostSessionService {
 
       // ── Step 5: Register with storymedia API ─────────────────────
       await this._registerStorymedia(phoneNumber, {
-        file_url: s3Url,
+        file_url: presigned.s3Url,
         storyId,
         fileName,
         mimeType,
@@ -242,19 +459,8 @@ class StoryPostSessionService {
       });
 
       // ── Step 6: Update upload count in context ───────────────────
-      const newCount = (ctx.uploadCount || 0) + 1;
-      await usersQueries.updateLastMessage(phoneNumber, {
-        flow: "post_session_upload",
-        step: 2,
-        context: { ...ctx, storyId, uploadCount: newCount },
-        text: "photo_uploaded",
-      });
+     
 
-      Logger.info("Photo uploaded successfully", {
-        phoneNumber,
-        uploadCount: newCount,
-        storyId,
-      });
 
       // ── Delete temp file after successful S3 upload ──────────────
       if (filePath) {
@@ -267,37 +473,34 @@ class StoryPostSessionService {
       }
 
       // ── Step 7: Acknowledge and ask for more / offer to finish ───
-      const remaining = MAX_PHOTOS - newCount;
-      if (remaining > 0) {
-        await whatsappService.sendInteractiveMessage({
-          to: phoneNumber,
-          type: "button",
-          body: {
-            text:
-              `✅  ${newCount}/${MAX_PHOTOS} ${selectedLanguageText.imageUploadSuccess}\n\n` +
-              `${remaining} ${selectedLanguageText.remainingPhotos}`,
-          },
-          action: {
-            buttons: [
-              {
-                type: "quick_reply",
-                title: "✅ " + selectedLanguageText.completedStatusText,
-                id: "post_upload_done",
-              },
-              {
-                type: "quick_reply",
-                title: `📷 ${selectedLanguageText.addMorePhotos}`,
-                id: "post_upload_more",
-              },
-            ],
-          },
-        });
-      } else {
+      const newCount = await usersQueries.incrementUploadCount(phoneNumber);
+
+      // Re-read context to get expectedImageCount (set by album handler)
+      const freshMsg = await usersQueries.getLastMessage(phoneNumber);
+      const expectedImageCount = freshMsg?.context?.expectedImageCount || 0;
+
+      Logger.info("Photo upload progress", {
+        phoneNumber,
+        newCount,
+        expectedImageCount,
+      });
+
+      const allDone = expectedImageCount > 0 && newCount >= expectedImageCount;
+
+      if (allDone || newCount >= MAX_PHOTOS) {
+        // All album images uploaded — complete
         await whatsappService.sendMessage(
           phoneNumber,
-          `✅ ${MAX_PHOTOS} ${selectedLanguageText.reportGenerationMessage}`,
+          `✅ ${selectedLanguageText.reportGenerationMessage}`,
         );
         await this.handleUploadDone(phoneNumber);
+      } else {
+        // Still waiting for more images from the album
+        Logger.info("Waiting for more album images", {
+          phoneNumber,
+          uploaded: newCount,
+          expected: expectedImageCount,
+        });
       }
 
       return { success: true, handled: true };
@@ -306,7 +509,7 @@ class StoryPostSessionService {
         phoneNumber,
         error: error.message,
       });
-      
+
       const keys = ["imageDownloadError"];
       const selectedLanguageText = await languageService.tBatch(
         phoneNumber,
@@ -329,6 +532,10 @@ class StoryPostSessionService {
 
       const lastMsg = await usersQueries.getLastMessage(phoneNumber);
       const ctx = lastMsg?.context || {};
+      if (uploadDoneTimers.has(phoneNumber)) {
+        clearTimeout(uploadDoneTimers.get(phoneNumber));
+        uploadDoneTimers.delete(phoneNumber);
+      }
 
       let storyId = ctx.storyId;
       if (!storyId) {
@@ -361,21 +568,21 @@ class StoryPostSessionService {
         type: "button",
         body: {
           text:
-            `✅ ${ctx.flowName === "guest-mi-story" ? selectedLanguageText.reportText : selectedLanguageText.storyText}\n\n` +
+            `✅ ${ctx.flowName === "guest-mi-story" ? selectedLanguageText.storyText : selectedLanguageText.reportText}\n\n` +
             selectedLanguageText.downloadorEditReport,
         },
         action: {
-          buttons: [
+         buttons: [
             {
               type: "quick_reply",
-              title: `⬇️ ${ctx.flowName === "guest-mi-story" ? selectedLanguageText.downloadReportText : selectedLanguageText.downloadStoryText}`,
+              title: `⬇️ ${ctx.flowName === "guest-mi-story" ? selectedLanguageText.downloadStoryText : selectedLanguageText.downloadReportText}`,
               id: "download_report",
             },
-            {
-              type: "quick_reply",
-              title: `✏️ ${ctx.flowName === "guest-mi-story" ? selectedLanguageText.editReportText : selectedLanguageText.editStoryText}`,
-              id: "edit_report",
-            },
+            // {
+            //   type: "quick_reply",
+            //   title: `✏️ ${ctx.flowName === "guest-mi-story" ? selectedLanguageText.editReportText : selectedLanguageText.editStoryText}`,
+            //   id: "edit_report",
+            // },
           ],
         },
       });
@@ -405,6 +612,9 @@ class StoryPostSessionService {
         "reportText",
         "storyText",
         "reportRetrievalError",
+        "finishingGreet",
+        "yes",
+        "no",
       ];
       const selectedLanguageText = await languageService.tBatch(
         phoneNumber,
@@ -450,9 +660,35 @@ class StoryPostSessionService {
 
       await usersQueries.clearLastMessage(phoneNumber);
 
-      const mainMenuMsg =
-        await languageService.buildMainMenuMessage(phoneNumber);
-      await whatsappService.sendInteractiveMessage(mainMenuMsg);
+      // const mainMenuMsg = await languageService.buildMainMenuMessage(
+      //   phoneNumber,
+      //   selectedLanguageText.FinishingGreet,
+      // );
+
+      let FinishMessage = {
+        to: phoneNumber,
+        type: "button",
+        body: {
+          text:
+            selectedLanguageText.finishingGreet ||
+            "Do you want to record another story/discussion? ✍️📖",
+        },
+        action: {
+          buttons: [
+            {
+              type: "quick_reply",
+              title: selectedLanguageText.yes || " ✅ Yes",
+              id: "yes_new_session",
+            },
+            {
+              type: "quick_reply",
+              title: selectedLanguageText.no || " ❌ No",
+              id: "no_new_session",
+            },
+          ],
+        },
+      };
+      await whatsappService.sendInteractiveMessage(FinishMessage);
 
       return { success: true, handled: true };
     } catch (error) {
@@ -563,7 +799,7 @@ class StoryPostSessionService {
       body: {
         text:
           `${selectedLanguageText.discussionRecorded}\n\n` +
-          `1📷 ${selectedLanguageText.add_photos} \n` +
+          `📷 ${selectedLanguageText.add_photos} \n` +
           `${selectedLanguageText.uploadLimit} ${MAX_PHOTOS} images.`,
       },
       action: {
@@ -656,10 +892,13 @@ class StoryPostSessionService {
           timeout: 15000,
         },
       );
-      Logger.info("Presigned URL obtained", { phoneNumber, storyId });
       return {
         uploadUrl: resp.data.upload_url || resp.data.uploadUrl || resp.data.url,
-        s3Url: resp.data.file_url || resp.data.fileUrl || resp.data.s3_url,
+        s3Url:
+          resp.data.file_url ||
+          resp.data.fileUrl ||
+          resp.data.s3Url ||
+          resp.data.s3_url,
       };
     } catch (error) {
       Logger.error("get-presigned-url failed", {
@@ -725,7 +964,7 @@ class StoryPostSessionService {
             "Content-Type": "application/json",
             Origin: process.env.ORIGIN_URL,
           },
-          timeout: 5000,
+          timeout: 100000,
         },
       );
       Logger.info("storymedia registered", { phoneNumber, storyId, fileName });
@@ -740,84 +979,36 @@ class StoryPostSessionService {
     }
   }
 
-  // async _downloadWhatsAppImage(message) {
-  //   try {
-  //     const imageId = message.image?.id;
-  //     if (!imageId) {
-  //       Logger.error("No image ID in message");
-  //       return {};
-  //     }
+  async scheduleUploadDone(phoneNumber, handler, delayMs = 3000) {
+    // Cancel any existing timer
+    if (uploadDoneTimers.has(phoneNumber)) {
+      clearTimeout(uploadDoneTimers.get(phoneNumber));
+    }
+    // Schedule a new one
+    const timer = setTimeout(async () => {
+      uploadDoneTimers.delete(phoneNumber);
+      await handler();
+    }, delayMs);
+    uploadDoneTimers.set(phoneNumber, timer);
+  }
 
-  //     const config = require("../config/config");
-
-  //     const mediaInfo = await axios.get(
-  //       `${config.whapi.baseUrl}/media/${imageId}`,
-  //       {
-  //         headers: { Authorization: `Bearer ${config.whapi.token}` },
-  //         timeout: 15000,
-  //       }
-  //     );
-
-  //     const mediaUrl =
-  //       mediaInfo.data.url  ||
-  //       mediaInfo.data.link ||
-  //       mediaInfo.data.media?.url;
-
-  //     if (!mediaUrl) {
-  //       Logger.error("No media URL from Whapi", { data: mediaInfo.data });
-  //       return {};
-  //     }
-
-  //     const imgResp = await axios.get(mediaUrl, {
-  //       responseType: "arraybuffer",
-  //       headers:      { Authorization: `Bearer ${config.whapi.token}` },
-  //       timeout:      30000,
-  //     });
-
-  //     const buffer   = Buffer.from(imgResp.data);
-  //     const mimeType = imgResp.headers["content-type"] || message.image?.mime_type || "image/jpeg";
-  //     const ext      = mimeType.split("/")[1] || "jpg";
-  //     const fileName = message.image?.filename || `${Date.now()}.${ext}`;
-
-  //     Logger.info("Image downloaded", { imageId, size: buffer.length, mimeType });
-  //     return { buffer, fileName, mimeType };
-  //   } catch (error) {
-  //     Logger.error("_downloadWhatsAppImage failed", { error: error.message });
-  //     return {};
-  //   }
-  // }
-  async _downloadWhatsAppImage(mediaUrl, fileName) {
+  async _downloadWhatsAppImage(mediaId, fileName) {
     try {
-      Logger.info("Downloading WhatsApp media", { fileName });
+      Logger.info("Downloading WhatsApp media", { fileName, mediaId });
 
-      const response = await downloadBinaryFile(mediaUrl);
+      const config = require("../config/config");
 
-      // if (!response.success) {
-      //   throw new Error(`Download failed: ${response.error}`);
-      // }
+      const response = await whatsappService.getMedia(mediaId);
 
-      // const buffer = Buffer.isBuffer(response.data)
-      //   ? response.data
-      //   : Buffer.from(response.data);
+      const buffer = Buffer.from(response.data);
 
-      if (!response.success) {
-        throw new Error(`Download failed: ${response.error}`);
-      }
-
-      const buffer = Buffer.isBuffer(response.data)
-        ? response.data
-        : Buffer.from(response.data);
-      // Validate file size
-      const instance = new StoryPostSessionService();
-      if (buffer.length > instance.maxFileSize) {
+      if (buffer.length > this.maxFileSize) {
         throw new Error("File size exceeds maximum limit of 25MB");
       }
 
-      // Ensure temp directory exists
-      await fs.mkdir(instance.tempDir, { recursive: true });
+      await fs.mkdir(this.tempDir, { recursive: true });
 
-      // Save to temp location
-      const filePath = path.join(instance.tempDir, fileName);
+      const filePath = path.join(this.tempDir, fileName);
       await fs.writeFile(filePath, buffer);
 
       Logger.info("Media downloaded successfully", {
@@ -828,11 +1019,13 @@ class StoryPostSessionService {
 
       return { filePath, buffer, size: buffer.length };
     } catch (error) {
-      Logger.error("Error downloading WhatsApp media", error);
+      Logger.error("Error downloading WhatsApp media", {
+        error: error.message,
+      });
       throw error;
     }
   }
-  async getFileExtension(mediaType) {
+  getFileExtension(mediaType) {
     const extensions = {
       image: "jpg",
       document: "pdf",

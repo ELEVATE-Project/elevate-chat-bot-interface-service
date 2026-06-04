@@ -129,6 +129,7 @@ module.exports = class users {
       "lastMessage.flow": messageData.flow || "",
       "lastMessage.step": messageData.step ?? 0,
       "lastMessage.context": messageData.context || {},
+      "lastMessage.uploadCount": messageData.uploadCount ?? 0,
       "lastMessage.updatedAt": new Date(),
       lastInteractionAt: new Date(),
     };
@@ -171,4 +172,32 @@ module.exports = class users {
       { new: true }
     ).lean();
   }
+
+  //for tracking uploads in storyPost flow
+  static async incrementUploadCount(phoneNumber) {
+  const result = await database.models.user.findOneAndUpdate(
+    { phoneNumber },
+    { $inc: { "lastMessage.uploadCount": 1 } },
+    { new: true, returnDocument: "after" }
+  );
+  return result?.lastMessage?.uploadCount; // returns NEW count after increment
+}
+
+static async incrementAudioUsage(phoneNumber) {
+  const result = await database.models.user.findOneAndUpdate(
+    { phoneNumber },
+    { $inc: { "metrics.audioUsageCount": 1 } },
+    { new: true, upsert: true }
+  );
+  return result?.metrics?.audioUsageCount;
+}
+
+static async incrementReportDownloads(phoneNumber) {
+  const result = await database.models.user.findOneAndUpdate(
+    { phoneNumber },
+    { $inc: { "metrics.reportDownloadCount": 1 } },
+    { new: true, upsert: true }
+  );
+  return result?.metrics?.reportDownloadCount;
+}
 }

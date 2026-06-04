@@ -58,8 +58,7 @@ class SessionService {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // 1.  POST /api/profile/ then GET /api/generate-session/
-  //     Stores { sessionId, profileId } on user.scope.activeSession
+  // 1.  Create a Mohini session and store sessionId
   // ─────────────────────────────────────────────────────────────────
   async createSession(phoneNumber, sessionType) {
     try {
@@ -231,12 +230,7 @@ class SessionService {
             phoneNumber,
             `👩‍💻 ${sessionType ==="discussion"? selectedLanguageText.conversationStartMessageForCaptureDiscussion:selectedLanguageText.conversationStartMessage}`
           );
-        } else {
-          await whatsappService.sendMessage(
-            phoneNumber,
-            `✅ ${selectedLanguageText.sessionReconnected}`
-          );
-        }
+        } 
 
         resolve({ success: true });
       });
@@ -272,10 +266,6 @@ class SessionService {
       // ── CLOSE ────────────────────────────────────────────────────
       // NOTE: Mohini does NOT close the WS when a session ends.
       // Session completion is detected in _handleSessionEnd (called
-      // after every bot message) via GET /api/companychat/.
-      // This close handler only fires on unexpected disconnects
-      // (network drops, server restarts) and offers the user a
-      // reconnect / new-session prompt.
       ws.on("close", async (code, reason) => {
         Logger.info("WebSocket closed", {
           phoneNumber,
@@ -293,8 +283,6 @@ class SessionService {
           );
         } catch (_) {}
 
-        // If _handleSessionEnd already ran (companychat COMPLETED path),
-        // scope.activeSession will have been unset – skip the prompt.
         try {
           const user = await usersQueries.findOne({ phoneNumber });
           if (!user?.scope?.activeSession?.sessionId) {
@@ -401,10 +389,9 @@ class SessionService {
               ]
         const selectedLanguageText= await languageService.tBatch(phoneNumber,keys)
       if (!session?.sessionId) {
-        Logger.warn("reconnect: no active session found in DB", { phoneNumber });
         await whatsappService.sendMessage(
           phoneNumber,
-          "⚠️ ${selectedLanguageText.noPreviousSession}"
+          `⚠️ ${selectedLanguageText.noPreviousSession}`
         );
         return { success: false, error: "No session in DB" };
       }
@@ -615,19 +602,8 @@ class SessionService {
 
       // ── SESSION COMPLETE DETECTION ────────────────────────────────
       // finish_reason === "stop" fires on EVERY bot turn (it just means
-      // the LLM finished generating tokens for that response), so it
-      // cannot be used as a termination signal.
-      //
-      // The only reliable signal is the companychat API: when the session
-      // is truly done, the last message's status becomes "COMPLETED".
-      //
-      // Strategy: after every bot message, fire-and-forget a companychat
-      // check. The check is cheap (one GET) and returns quickly with
-      // "not completed" for most turns. On the final turn it returns
-      // "COMPLETED" and we trigger the post-session flow.
       if (source === "bot") {
         // Non-blocking – do not await so the WS message handler returns
-        // immediately and doesn't back-pressure Mohini.
         setImmediate(() => this._handleSessionEnd(phoneNumber));
       }
 
@@ -686,12 +662,10 @@ class SessionService {
         break;
       }
       
-      const keys=[           
-                "errorMessage"
-              ]
-        const selectedLanguageText= await languageService.tBatch(phoneNumber,keys)
       case "error":
         Logger.error("Mohini error payload", { phoneNumber, payload });
+          const keys=["errorMessage"];
+        const selectedLanguageText= await languageService.tBatch(phoneNumber,keys)
         await whatsappService.sendMessage(
           phoneNumber,
           selectedLanguageText.errorMessage
@@ -709,70 +683,46 @@ class SessionService {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────────────
-  // PRIVATE: Fired after every bot message (non-blocking via setImmediate).
-  //
-  // Calls GET /api/companychat/ to check whether the last message in
-  // the session has status "COMPLETED".  For most bot turns this returns
-  // quickly with "not completed" and we exit immediately.  On the final
-  // turn it returns "COMPLETED" and we trigger the full post-session flow.
-  //
-  // A per-phone in-memory Set guards against the race where multiple
-  // concurrent calls (e.g. two fast bot messages) both see COMPLETED
-  // and both try to start post-session.
-  // ─────────────────────────────────────────────────────────────────
   async _handleSessionEnd(phoneNumber) {
-    // Race guard – only one invocation may proceed past this point
-    if (this._sessionEndInProgress.has(phoneNumber)) return;
+  if (this._sessionEndInProgress.has(phoneNumber)) return;
 
-    try {
-      const user    = await usersQueries.findOne({ phoneNumber });
-      const session = user?.scope?.activeSession;
+  try {
+    const user = await usersQueries.findOne({ phoneNumber });
+    const session = user?.scope?.activeSession;
+    if (!session?.sessionId) return;
 
-      // Already cleaned up by a previous invocation
-      if (!session?.sessionId) return;
+    const isCompleted = await this.checkSessionCompleted(session.sessionId);
+    if (!isCompleted) return;
 
-      // Fast check – if not completed, nothing to do for this turn
-      const isCompleted = await this.checkSessionCompleted(session.sessionId);
-      if (!isCompleted) return;
+    this._sessionEndInProgress.add(phoneNumber);
 
-      // Mark in-progress AFTER confirming completion so we don't block
-      // early turns unnecessarily
-      this._sessionEndInProgress.add(phoneNumber);
+    Logger.info("_handleSessionEnd: session COMPLETED – starting post-session", {
+      phoneNumber,
+      sessionId: session.sessionId,
+    });
 
-      Logger.info("_handleSessionEnd: session COMPLETED – starting post-session", {
-        phoneNumber,
-        sessionId: session.sessionId,
-      });
+    // ── FIX: unset activeSession BEFORE closing the WS ──────────
+    // The close handler checks scope.activeSession to decide whether
+    // to show the reconnect prompt. If we unset it first, the close
+    // handler will see no session and skip the prompt correctly.
+    await usersQueries.update(
+      { phoneNumber },
+      { $unset: { "scope.activeSession": "" } }
+    ).catch(() => {});
 
-      // 1. Close the WS connection FIRST.
-      //    This removes the phone from the in-memory activeConnections Map
-      //    so that isConnected() returns false immediately.  Any user message
-      //    that arrives after this point will NOT be forwarded to Mohini.
-      //    closeConnection() also sets wsSession.status = "disconnected" in MongoDB.
-      await this.closeConnection(phoneNumber);
+    // Now close — close handler will see no activeSession, skip prompt
+    await this.closeConnection(phoneNumber);
 
-      // 2. Unset activeSession so that:
-      //    a) concurrent _handleSessionEnd calls see no session and exit early, and
-      //    b) the WS close handler (fired by closeConnection above) sees no
-      //       activeSession and skips the reconnect prompt.
-      await usersQueries.update(
-        { phoneNumber },
-        { $unset: { "scope.activeSession": "" } }
-      ).catch(() => {});
+    const storyPostSessionService = require("./storyPostSessionService");
+    await storyPostSessionService.startPostSession(phoneNumber, session);
 
-      // 3. Trigger post-session flow (calls end-story, then photo upload prompt)
-      const storyPostSessionService = require("./storyPostSessionService");
-      await storyPostSessionService.startPostSession(phoneNumber, session);
-
-    } catch (err) {
-      Logger.error("_handleSessionEnd error", { phoneNumber, err: err.message });
-    } finally {
-      // Always release the guard so future sessions for this phone work
-      this._sessionEndInProgress.delete(phoneNumber);
-    }
+  } catch (err) {
+    Logger.error("_handleSessionEnd error", { phoneNumber, err: err.message });
+  } finally {
+    this._sessionEndInProgress.delete(phoneNumber);
   }
+}
+  
 
   // PRIVATE: Handle extra_content alongside a bot message
   // ─────────────────────────────────────────────────────────────────
