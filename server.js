@@ -28,9 +28,7 @@ const initializeDatabase = async () => {
 
     // Check if users collection exists
     if (!collectionNames.includes("users")) {
-      Logger.info("Creating users collection...");
       await database.db.db.createCollection("users");
-      Logger.info("Users collection created successfully");
     }
 
     Logger.info("Database initialized", {

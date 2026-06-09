@@ -13,7 +13,6 @@ class StoryService {
    */
   static async startStoryRecording(phoneNumber) {
     try {
-      Logger.info("Starting story recording flow", { phoneNumber });
 
       await usersQueries.updateLastMessage(phoneNumber, {
         flow: "story_recording",
@@ -41,7 +40,6 @@ class StoryService {
         },
       });
 
-      Logger.info("Story recording prompt sent", { phoneNumber });
 
       // Wait 20 seconds, then show post-recording options
       setTimeout(async () => {
@@ -67,7 +65,6 @@ class StoryService {
    */
   static async showPostRecordingMenu(phoneNumber) {
     try {
-      Logger.info("Showing post-recording menu", { phoneNumber });
 
       await usersQueries.updateLastMessage(phoneNumber, {
         flow: "story_recording",
@@ -99,7 +96,6 @@ class StoryService {
         },
       });
 
-      Logger.info("Post-recording menu sent", { phoneNumber });
     } catch (error) {
       Logger.error("Error showing post-recording menu", error);
       await whatsappService.sendMessage(
@@ -114,7 +110,6 @@ class StoryService {
    */
   static async handleRecordAnotherStory(phoneNumber) {
     try {
-      Logger.info("User wants to record another story", { phoneNumber });
 
       // Clear previous context and restart
       await usersQueries.clearLastMessage(phoneNumber);

@@ -40,7 +40,6 @@ class InactivityReminderService {
         activeReminders.delete(phoneNumber);
       }
 
-      Logger.info("✅ User activity tracked", { phoneNumber });
     } catch (error) {
       Logger.error("❌ Error tracking user activity", error);
     }
@@ -91,8 +90,6 @@ class InactivityReminderService {
         },
       });
 
-      Logger.info("✅ Inactivity reminder sent successfully", { phoneNumber });
-
       // Update metadata
       const remindersCount = (user.metadata?.remindersCount || 0) + 1;
 
@@ -142,7 +139,6 @@ class InactivityReminderService {
       });
 
       if (inactiveUsers.length === 0) {
-        Logger.info("✅ No inactive users found");
         return { success: true, processedCount: 0 };
       }
 
@@ -206,9 +202,6 @@ class InactivityReminderService {
       this.checkAndRemindInactiveUsers();
     }, CHECK_INTERVAL);
 
-    Logger.info("✅ Inactivity reminder job started successfully", {
-      intervalId,
-    });
 
     // Return interval ID so you can stop it if needed
     return intervalId;
