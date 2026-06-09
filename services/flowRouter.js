@@ -103,13 +103,6 @@ class FlowRouter {
 
       const messageText = message.text?.body?.trim() || "";
 
-      Logger.info("Flow routing check", {
-        phoneNumber,
-        hasActiveFlow: !!lastMessage?.flow,
-        currentFlow: lastMessage?.flow || "none",
-        currentStep: lastMessage?.step || 0,
-        messageType: message.type,
-      });
 
       // ============================================
       // STEP 1: Voice messages
@@ -184,12 +177,10 @@ class FlowRouter {
         // ── Voice: user approved transcript ─────────────────────────
         if (selectedAction === "voice_send") {
           const lastMsg = await usersQueries.getLastMessage(phoneNumber);
-          const text = lastMsg?.context?.pendingText;
+          const { pendingText, s3AudioUrl } = lastMsg?.context || {};
 
-          if (!text) {
-            Logger.warn("voice_send: no pendingText in context", {
-              phoneNumber,
-            });
+          if (!pendingText) {
+         
             await whatsappService.sendMessage(
               phoneNumber,
               `❌ ${selectedLanguageText.voiceNoPending}`,
@@ -197,7 +188,10 @@ class FlowRouter {
             return { success: false, handled: true };
           }
 
-          const sent = await sessionService.sendMessage(phoneNumber, text);
+          const sent = sessionService.sendMessage(phoneNumber, pendingText, {
+            asrAudio: s3AudioUrl || "",
+            context: "",
+          });
 
           if (sent) {
             await usersQueries.updateLastMessage(phoneNumber, {
@@ -209,12 +203,8 @@ class FlowRouter {
               phoneNumber,
               `✅ ${selectedLanguageText.voiceSent}`,
             );
-            Logger.info("voice_send: transcript forwarded to WS", {
-              phoneNumber,
-              text,
-            });
+           
           } else {
-            Logger.warn("voice_send: WS send failed", { phoneNumber });
             await whatsappService.sendMessage(
               phoneNumber,
               `❌ ${selectedLanguageText.voiceSendFailed}`,
@@ -308,13 +298,12 @@ class FlowRouter {
 
         // ── Report: download ────────────────────────────────────────
         if (selectedAction === "download_report") {
-          usersQueries.incrementReportDownloads(phoneNumber)
-            .catch((err) =>
-              Logger.warn("Failed to increment report downloads", {
-                phoneNumber,
-                error: err.message,
-              }),
-            );
+          usersQueries.incrementReportDownloads(phoneNumber).catch((err) =>
+            Logger.warn("Failed to increment report downloads", {
+              phoneNumber,
+              error: err.message,
+            }),
+          );
           return await storyPostSessionService.handleDownloadReport(
             phoneNumber,
           );
@@ -538,45 +527,58 @@ class FlowRouter {
   }
 
   async handleSessionContinue(phoneNumber) {
-    try {
-      Logger.info("User chose to continue session", { phoneNumber });
+  try {
+    Logger.info("User chose to continue session", { phoneNumber });
 
-      const keys = ["sessionLost"];
-      const selectedLanguageText = await languageService.tBatch(
-        phoneNumber,
-        keys,
-      );
+    const keys = ["sessionLost"];
+    const selectedLanguageText = await languageService.tBatch(phoneNumber, keys);
 
-      const result = await sessionService.reconnect(phoneNumber);
-
-      if (!result.success) {
-        // Could not reconnect – show main menu
-        await whatsappService.sendMessage(
-          phoneNumber,
-          `⚠️ ${selectedLanguageText.sessionLost}`,
-        );
-        const user = await usersQueries.findOne({ phoneNumber });
-        const message = {
-          from: phoneNumber,
-          type: "text",
-          text: { body: "menu" },
-        };
-        await userService.handleUserMessage(message);
+    await usersQueries.update(
+      { phoneNumber },
+      {
+        $unset: {
+          "scope.wsSession.awaitingInactivityResponse": "",
+          "scope.wsSession.awaitingReconnectResponse":  "",
+        },
       }
+    ).catch(() => {});
 
-      return {
-        success: result.success,
-        handled: true,
-        route: "session-reconnected",
-      };
-    } catch (error) {
-      Logger.error("handleSessionContinue error", {
+    const result = await sessionService.reconnect(phoneNumber);
+
+    if (result.success) {
+      // Wait for Mohini auth ack before returning so the next
+      // user message hits a ready WS
+      const ws = sessionService.getActiveWs(phoneNumber);
+      if (ws?._mohiniReady) {
+        await Promise.race([
+          ws._mohiniReady,
+          new Promise((resolve) => setTimeout(resolve, 5000)),
+        ]);
+      }
+    } else {
+      // Could not reconnect – show main menu
+      await whatsappService.sendMessage(
         phoneNumber,
-        error: error.message,
-      });
-      return { success: false, handled: true };
+        `⚠️ ${selectedLanguageText.sessionLost}`,
+      );
+      const message = {
+        from: phoneNumber,
+        type: "text",
+        text: { body: "menu" },
+      };
+      await userService.handleUserMessage(message);
     }
+
+    return {
+      success: result.success,
+      handled: true,
+      route:   "session-reconnected",
+    };
+  } catch (error) {
+    Logger.error("handleSessionContinue error", { phoneNumber, error: error.message });
+    return { success: false, handled: true };
   }
+}
 
   // ─────────────────────────────────────────────────────────────────
   // Handle "New Session" from inactivity / disconnect prompt (req #2)
@@ -585,50 +587,49 @@ class FlowRouter {
   // the main menu so they can pick a fresh session type.
   // ─────────────────────────────────────────────────────────────────
   async handleSessionNew(phoneNumber, originalMessage) {
-    try {
-      Logger.info("User chose to start a new session", { phoneNumber });
+  try {
+    Logger.info("User chose to start a new session", { phoneNumber });
 
-      const keys = ["newSessionStarted"];
-      const selectedLanguageText = await languageService.tBatch(
-        phoneNumber,
-        keys,
-      );
+    const keys = ["newSessionStarted"];
+    const selectedLanguageText = await languageService.tBatch(phoneNumber, keys);
 
-      // Close the old WS without triggering post-session (not completed)
-      await sessionService.closeConnection(phoneNumber);
+    // Close the old WS without triggering post-session (not completed)
+    await sessionService.closeConnection(phoneNumber);
 
-      // Wipe session data from MongoDB
-      await usersQueries
-        .update(
-          { phoneNumber },
-          { $unset: { "scope.activeSession": "", "scope.wsSession": "" } },
-        )
-        .catch(() => {});
+    // ── Wipe everything — session data + both awaiting flags ──────
+    await usersQueries.update(
+      { phoneNumber },
+      {
+        $unset: {
+          "scope.activeSession":                        "",
+          "scope.wsSession":                            "",
+          "scope.wsSession.awaitingInactivityResponse": "",
+          "scope.wsSession.awaitingReconnectResponse":  "",
+        },
+      }
+    ).catch(() => {});
 
-      await usersQueries.clearLastMessage(phoneNumber);
+    await usersQueries.clearLastMessage(phoneNumber);
 
-      await whatsappService.sendMessage(
-        phoneNumber,
-        `🔄 ${selectedLanguageText.newSessionStarted}`,
-      );
+    await whatsappService.sendMessage(
+      phoneNumber,
+      `🔄 ${selectedLanguageText.newSessionStarted}`,
+    );
 
-      // Route to main menu
-      const menuMessage = {
-        ...originalMessage,
-        type: "text",
-        text: { body: "menu" },
-      };
-      await userService.handleUserMessage(menuMessage);
+    // Route to main menu
+    const menuMessage = {
+      ...originalMessage,
+      type: "text",
+      text: { body: "menu" },
+    };
+    await userService.handleUserMessage(menuMessage);
 
-      return { success: true, handled: true, route: "session-new" };
-    } catch (error) {
-      Logger.error("handleSessionNew error", {
-        phoneNumber,
-        error: error.message,
-      });
-      return { success: false, handled: true };
-    }
+    return { success: true, handled: true, route: "session-new" };
+  } catch (error) {
+    Logger.error("handleSessionNew error", { phoneNumber, error: error.message });
+    return { success: false, handled: true };
   }
+}
 
   // ─────────────────────────────────────────────────────────────────
   // Language selection handler

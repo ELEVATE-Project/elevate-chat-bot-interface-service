@@ -29,10 +29,9 @@ class MessageController {
    */
   static async handleWhatsAppMessage(message, phoneNumber) {
     try {
-      Logger.info("MessageController: Received", {
-        phoneNumber,
-        type: message.type,
-      });
+      if (message.type === "action") {
+        return { success: false, handled: true, route: "unsupported" };
+      }
       whatsappService.sendTyping(phoneNumber);
 
       const keys = ["whatsappNotSupported", "notUnderstood"];
@@ -59,9 +58,6 @@ class MessageController {
       // STEP 1: Interactive messages → always go to flowRouter
       // ──────────────────────────────────────────────────────────────
       if (this.isInteractiveMessage(message)) {
-        Logger.info("MessageController: Interactive → flowRouter", {
-          phoneNumber,
-        });
         const result = await flowRouter.route(message);
         return { ...result, route: "flowrouter-interactive" };
       }
@@ -71,10 +67,6 @@ class MessageController {
       //         ALL non-interactive messages straight to the WS.
       // ──────────────────────────────────────────────────────────────
       if (sessionService.isConnected(phoneNumber)) {
-        Logger.info("MessageController: Active WS session – forwarding", {
-          phoneNumber,
-          type: message.type,
-        });
         return await this.forwardToActiveSession(message, phoneNumber);
       }
 
@@ -82,9 +74,6 @@ class MessageController {
       // STEP 3: Audio / voice (no active WS)
       // ──────────────────────────────────────────────────────────────
       if (message.type === "audio" || message.type === "voice") {
-        Logger.info("MessageController: Audio → transcribe → NLP", {
-          phoneNumber,
-        });
         return await this.handleAudioMessage(message, phoneNumber);
       }
 
@@ -93,15 +82,8 @@ class MessageController {
       // ──────────────────────────────────────────────────────────────
       if (message.type === "text") {
         const messageText = message.text?.body?.trim() || "";
-        Logger.info("MessageController: Text", {
-          phoneNumber,
-          preview: messageText.substring(0, 50),
-        });
 
         if (this.isSimpleCommand(messageText)) {
-          Logger.info("MessageController: Simple command → flowRouter", {
-            phoneNumber,
-          });
           const result = await flowRouter.route(message);
           return { ...result, route: "flowrouter-command" };
         }
@@ -114,8 +96,6 @@ class MessageController {
       // Ignore album header — individual images arrive as separate messages
       if (message.type === "album") {
         const expectedCount = message.album?.expectedImageCount || 0;
-        Logger.info("Album received", { phoneNumber, expectedCount });
-
         // Store expected count in lastMessage context
         const lastMsg = await usersQueries.getLastMessage(phoneNumber);
         const ctx = lastMsg?.context || {};
@@ -128,11 +108,32 @@ class MessageController {
 
         return { success: true, handled: true, route: "album-header" };
       }
+
+      if (
+        sessionService.isConnected(phoneNumber) &&
+        (message.type === "edited" || message.edited)
+      ) {
+        const keys = ["editNotSupported"];
+        const txt = await languageService.tBatch(phoneNumber, keys);
+
+        await whatsappService.sendMessage(
+          phoneNumber,
+          `ℹ️ ${
+            txt.editNotSupported ||
+            "Message editing isn't supported during a session. Please continue typing a new message."
+          }`,
+        );
+
+        return {
+          success: true,
+          handled: true,
+          route: "edited-ignored",
+        };
+      }
       // ──────────────────────────────────────────────────────────────
       // STEP 6: Media
       // ──────────────────────────────────────────────────────────────
       if (message.type === "image" || message.type === "document") {
-        Logger.info("MessageController: Media → flowRouter", { phoneNumber });
         const result = await flowRouter.route(message);
         return { ...result, route: "flowrouter-media" };
       }
@@ -157,54 +158,62 @@ class MessageController {
   // ──────────────────────────────────────────────────────────────────
   // STEP 0 impl: Auto-reconnect when server restarted
   // ──────────────────────────────────────────────────────────────────
-  static async autoReconnectIfNeeded(phoneNumber) {
-    try {
-      const user = await usersQueries.findOne({ phoneNumber });
-      const storedSession = user?.scope?.activeSession;
+ static async autoReconnectIfNeeded(phoneNumber) {
+  try {
+    const user = await usersQueries.findOne({ phoneNumber });
+    const storedSession = user?.scope?.activeSession;
 
-      // No stored session → nothing to reconnect to
-      if (!storedSession?.sessionId) return;
+    // No stored session → nothing to reconnect to, fall through normally
+    if (!storedSession?.sessionId) return;
 
-      const wsStatus = user?.scope?.wsSession?.status;
+    Logger.info("MessageController: Stored session found but no live WS – reconnecting", {
+      phoneNumber,
+      sessionId:  storedSession.sessionId,
+      createdAt:  storedSession.createdAt,
+    });
 
-      Logger.info("MessageController: Stored session found but no live WS", {
+    const result = await sessionService.reconnect(phoneNumber);
+
+    if (result.success) {
+      Logger.info("MessageController: Auto-reconnect succeeded – waiting for Mohini auth", {
         phoneNumber,
-        sessionId: storedSession.sessionId,
-        wsStatus: wsStatus ?? "none",
       });
 
-      // Reconnect for any status except an explicit user-initiated cancel
-      // (we unset activeSession on cancel, so this guard rarely fires)
-      Logger.info("MessageController: Auto-reconnecting after restart", {
-        phoneNumber,
-        sessionId: storedSession.sessionId,
-      });
-
-      const result = await sessionService.reconnect(phoneNumber);
-
-      if (result.success) {
-        Logger.info("MessageController: Auto-reconnect succeeded", {
-          phoneNumber,
-        });
-
-        // Give Mohini 800 ms to process the authenticate frame before
-        // the caller forwards the user's actual message over the WS.
-        await new Promise((resolve) => setTimeout(resolve, 800));
+      // Wait for authenticated ack instead of flat delay
+      const ws = sessionService.getActiveWs(phoneNumber);
+      if (ws?._mohiniReady) {
+        await Promise.race([
+          ws._mohiniReady,
+          new Promise((resolve) =>
+            setTimeout(() => {
+              Logger.warn("MessageController: Mohini auth wait timed out – proceeding anyway", {
+                phoneNumber,
+              });
+              resolve();
+            }, 5000)
+          ),
+        ]);
       } else {
-        Logger.warn("MessageController: Auto-reconnect failed", {
-          phoneNumber,
-          error: result.error,
-        });
-        // Don't block the message — flowRouter will handle it normally
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
-    } catch (error) {
-      Logger.error("MessageController: autoReconnectIfNeeded error", {
+
+      Logger.info("MessageController: WS ready – forwarding user message", { phoneNumber });
+
+    } else {
+      Logger.warn("MessageController: Auto-reconnect failed", {
         phoneNumber,
-        error: error.message,
+        error: result.error,
       });
-      // Non-fatal: let the message fall through to normal routing
+      // Non-fatal — _sendReconnectPrompt already sent by reconnect()
+      // flowRouter handles whatever the user sends next
     }
+  } catch (error) {
+    Logger.error("MessageController: autoReconnectIfNeeded error", {
+      phoneNumber,
+      error: error.message,
+    });
   }
+}
 
   // ──────────────────────────────────────────────────────────────────
   // Forward message to the active Mohini WS session
@@ -243,12 +252,12 @@ class MessageController {
           );
           return { success: false, handled: true, route: "ws-audio-failed" };
         }
-          usersQueries.incrementAudioUsage(phoneNumber).catch((err) =>
-                  Logger.warn("Failed to increment audio usage", {
-                    phoneNumber,
-                    error: err.message,
-                  }),
-                );
+        usersQueries.incrementAudioUsage(phoneNumber).catch((err) =>
+          Logger.warn("Failed to increment audio usage", {
+            phoneNumber,
+            error: err.message,
+          }),
+        );
         await whatsappService.sendMessage(
           phoneNumber,
           `🎤 ${selectedLanguageText.voiceProcessing}`,
@@ -283,7 +292,7 @@ class MessageController {
         const flowName = session?.flowName || "guest-discussion";
 
         // ── Transcribe ────────────────────────────────────────────
-        const transcript = await this._transcribeAudio(
+        const result = await this._transcribeAudio(
           phoneNumber,
           audioId,
           audioMimeType,
@@ -292,7 +301,7 @@ class MessageController {
           flowName,
         );
 
-        if (!transcript) {
+        if (!result?.transcript) {
           await whatsappService.sendMessage(
             phoneNumber,
             `❌ ${selectedLanguageText.notUnderstood}`,
@@ -304,10 +313,13 @@ class MessageController {
           };
         }
 
+        const { transcript, s3AudioUrl } = result;
+
+
         // ── Store transcript, ask user to confirm ─────────────────
         await usersQueries.updateLastMessage(phoneNumber, {
           flow: "voice_confirm",
-          context: { pendingText: transcript, sessionActive: true },
+          context: { pendingText: transcript, s3AudioUrl,sessionActive: true },
           text: "voice_transcribed",
         });
 
@@ -424,7 +436,6 @@ class MessageController {
     }
   }
 
-
   static async _transcribeAudio(
     phoneNumber,
     audioId,
@@ -495,7 +506,9 @@ class MessageController {
 
       const transcript = asrResp.data?.transcript || asrResp.data?.text;
       Logger.info("Transcription complete", { phoneNumber, transcript });
-      return transcript || null;
+      if (!transcript) return null;
+
+      return { transcript, s3AudioUrl };
     } catch (error) {
       Logger.error("_transcribeAudio failed", {
         phoneNumber,
