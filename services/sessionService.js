@@ -418,22 +418,22 @@ class SessionService {
   // ─────────────────────────────────────────────────────────────────
   // 5.  Close / terminate
   // ─────────────────────────────────────────────────────────────────
- async closeConnection(phoneNumber) {
-  clearInactivityTimer(phoneNumber);
-  const ws = activeConnections.get(phoneNumber);
-  if (ws) {
-    ws._intentionalClose = true; // ← tells close handler not to prompt
-    ws.terminate();
-    activeConnections.delete(phoneNumber);
-    Logger.info("WS terminated", { phoneNumber });
+  async closeConnection(phoneNumber) {
+    clearInactivityTimer(phoneNumber);
+    const ws = activeConnections.get(phoneNumber);
+    if (ws) {
+      ws._intentionalClose = true; // ← tells close handler not to prompt
+      ws.terminate();
+      activeConnections.delete(phoneNumber);
+      Logger.info("WS terminated", { phoneNumber });
+    }
+    try {
+      await usersQueries.update(
+        { phoneNumber },
+        { $set: { "scope.wsSession.status": "disconnected" } },
+      );
+    } catch (_) {}
   }
-  try {
-    await usersQueries.update(
-      { phoneNumber },
-      { $set: { "scope.wsSession.status": "disconnected" } }
-    );
-  } catch (_) {}
-}
 
   // ─────────────────────────────────────────────────────────────────
   // 6.  Guard used by flowRouter and messageController
@@ -565,8 +565,23 @@ class SessionService {
     inactivityTimers.delete(phoneNumber);
     Logger.info("Inactivity timeout – prompting user", { phoneNumber });
 
-    // WS may have already closed for other reasons
     if (!this.isConnected(phoneNumber)) return;
+
+    // ── Don't interrupt voice confirmation or edit flow ───────────
+    // User is mid-decision on a transcription — give them more time
+    // by resetting the timer instead of showing the inactivity prompt.
+    try {
+      const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+      if (lastMsg?.flow === "voice_confirm" || lastMsg?.flow === "voice_edit") {
+        Logger.info("Inactivity timeout during voice flow – extending timer", {
+          phoneNumber,
+          flow: lastMsg.flow,
+        });
+        this.resetInactivityTimer(phoneNumber);
+        return;
+      }
+    } catch (_) {}
+
     const keys = [
       "inactiveSession",
       "reconnectPrompt",
@@ -577,18 +592,21 @@ class SessionService {
       phoneNumber,
       keys,
     );
+
     try {
       await usersQueries.update(
         { phoneNumber },
         { $set: { "scope.wsSession.awaitingInactivityResponse": true } },
       );
 
+      await this.closeConnection(phoneNumber);
+
       await whatsappService.sendInteractiveMessage({
         to: phoneNumber,
         type: "button",
         body: {
           text:
-            `⏰${selectedLanguageText.inactiveSession}.\n\n` +
+            `⏰ ${selectedLanguageText.inactiveSession}.\n\n` +
             `${selectedLanguageText.reconnectPrompt}.\n\n`,
         },
         action: {

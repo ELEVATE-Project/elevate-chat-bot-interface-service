@@ -32,13 +32,44 @@ class MessageController {
       if (message.type === "action") {
         return { success: false, handled: true, route: "unsupported" };
       }
-      whatsappService.sendTyping(phoneNumber);
-
-      const keys = ["whatsappNotSupported", "notUnderstood"];
+      
+      const keys = ["whatsappNotSupported", "notUnderstood","editNotSupported"];
       const selectedLanguageText = await languageService.tBatch(
         phoneNumber,
         keys,
       );
+      // Ignore album header — individual images arrive as separate messages
+      if (message.type === "album") {
+        const expectedCount = message.album?.expectedImageCount || 0;
+        // Store expected count in lastMessage context
+        const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+        const ctx = lastMsg?.context || {};
+        await usersQueries.updateLastMessage(phoneNumber, {
+          flow: "post_session_upload",
+          step: 2,
+          context: { ...ctx, expectedImageCount: expectedCount },
+          text: "album_start",
+        });
+
+        return { success: true, handled: true, route: "album-header" };
+      }
+
+
+      //ignore message type edited
+      if (message.type === "edited" || message.edited) {
+        if (sessionService.isConnected(phoneNumber)) {
+          const keys = ["editNotSupported"];
+          const txt = await languageService.tBatch(phoneNumber, keys);
+          await whatsappService.sendMessage(
+            phoneNumber,
+            `ℹ️ ${txt.editNotSupported || "Message editing isn't supported during a session."}`,
+          );
+        }
+        return { success: true, handled: true, route: "edited-ignored" };
+      }
+      whatsappService.sendTyping(phoneNumber);
+
+      
 
       // ──────────────────────────────────────────────────────────────
       // STEP 0 : Auto-reconnect after server restar
@@ -92,21 +123,6 @@ class MessageController {
           phoneNumber,
           `❌ ${selectedLanguageText.notUnderstood}`,
         );
-      }
-      // Ignore album header — individual images arrive as separate messages
-      if (message.type === "album") {
-        const expectedCount = message.album?.expectedImageCount || 0;
-        // Store expected count in lastMessage context
-        const lastMsg = await usersQueries.getLastMessage(phoneNumber);
-        const ctx = lastMsg?.context || {};
-        await usersQueries.updateLastMessage(phoneNumber, {
-          flow: "post_session_upload",
-          step: 2,
-          context: { ...ctx, expectedImageCount: expectedCount },
-          text: "album_start",
-        });
-
-        return { success: true, handled: true, route: "album-header" };
       }
 
       if (
@@ -163,13 +179,32 @@ class MessageController {
     const user = await usersQueries.findOne({ phoneNumber });
     const storedSession = user?.scope?.activeSession;
 
-    // No stored session → nothing to reconnect to, fall through normally
     if (!storedSession?.sessionId) return;
+
+    // ── Don't reconnect during post-session flows ─────────────────
+    // If activeSession wasn't cleaned up properly but we're already
+    // in post_session_upload/report, reconnecting would break the flow.
+    const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+    if (
+      lastMsg?.flow === "post_session_upload" ||
+      lastMsg?.flow === "post_session_report"
+    ) {
+      Logger.info("autoReconnectIfNeeded: skipping – in post-session flow", {
+        phoneNumber,
+        flow: lastMsg.flow,
+      });
+      // Clean up the stale activeSession so this never fires again
+      await usersQueries.update(
+        { phoneNumber },
+        { $unset: { "scope.activeSession": "" } }
+      ).catch(() => {});
+      return;
+    }
 
     Logger.info("MessageController: Stored session found but no live WS – reconnecting", {
       phoneNumber,
-      sessionId:  storedSession.sessionId,
-      createdAt:  storedSession.createdAt,
+      sessionId: storedSession.sessionId,
+      createdAt: storedSession.createdAt,
     });
 
     const result = await sessionService.reconnect(phoneNumber);
@@ -179,7 +214,6 @@ class MessageController {
         phoneNumber,
       });
 
-      // Wait for authenticated ack instead of flat delay
       const ws = sessionService.getActiveWs(phoneNumber);
       if (ws?._mohiniReady) {
         await Promise.race([
@@ -198,14 +232,11 @@ class MessageController {
       }
 
       Logger.info("MessageController: WS ready – forwarding user message", { phoneNumber });
-
     } else {
       Logger.warn("MessageController: Auto-reconnect failed", {
         phoneNumber,
         error: result.error,
       });
-      // Non-fatal — _sendReconnectPrompt already sent by reconnect()
-      // flowRouter handles whatever the user sends next
     }
   } catch (error) {
     Logger.error("MessageController: autoReconnectIfNeeded error", {
@@ -315,11 +346,10 @@ class MessageController {
 
         const { transcript, s3AudioUrl } = result;
 
-
         // ── Store transcript, ask user to confirm ─────────────────
         await usersQueries.updateLastMessage(phoneNumber, {
           flow: "voice_confirm",
-          context: { pendingText: transcript, s3AudioUrl,sessionActive: true },
+          context: { pendingText: transcript, s3AudioUrl, sessionActive: true },
           text: "voice_transcribed",
         });
 

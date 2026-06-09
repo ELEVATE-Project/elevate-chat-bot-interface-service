@@ -148,7 +148,7 @@ module.exports = class users {
   static async getLastMessage(phoneNumber) {
     const user = await database.models.user.findOne(
       { phoneNumber },
-      { lastMessage: 1, name: 1 ,wsSession: 1}
+      { lastMessage: 1, name: 1 ,wsSession: 1,scope:1}
     ).lean();
     return user?.lastMessage || null;
   }
@@ -199,5 +199,18 @@ static async incrementReportDownloads(phoneNumber) {
     { new: true, upsert: true }
   );
   return result?.metrics?.reportDownloadCount;
+}
+
+static async updateLastMessageAtomic(phoneNumber, filter, update) {
+  return await database.models.user.updateOne(
+    { phoneNumber, ...filter },
+    update
+  );
+}
+static async updateLastMessageAtomic(phoneNumber, filter, update) {
+  return await database.models.user.updateOne(
+    { phoneNumber, ...filter },
+    update
+  );
 }
 }
