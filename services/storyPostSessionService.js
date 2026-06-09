@@ -237,7 +237,7 @@ class StoryPostSessionService {
 
       const allDone = expectedImageCount > 0 && newCount >= expectedImageCount;
 
-      if (allDone || newCount >= MAX_PHOTOS) {
+      // if (allDone || newCount >= MAX_PHOTOS) {
         // All album images uploaded — complete
         // await whatsappService.sendMessage(
         //   phoneNumber,
@@ -259,14 +259,14 @@ class StoryPostSessionService {
         } finally {
           this._uploadDoneInProgress.delete(phoneNumber);
         }
-      } else {
-        // Still waiting for more images from the album
-        Logger.info("Waiting for more album images", {
-          phoneNumber,
-          uploaded: newCount,
-          expected: expectedImageCount,
-        });
-      }
+      // } else {
+      //   // Still waiting for more images from the album
+      //   Logger.info("Waiting for more album images", {
+      //     phoneNumber,
+      //     uploaded: newCount,
+      //     expected: expectedImageCount,
+      //   });
+      // }
 
       return { success: true, handled: true };
     } catch (error) {
