@@ -72,7 +72,6 @@ class FlowRouter {
       // STEP 0.5: Handle media evidence upload (existing flow)
       // ============================================
       const lastMessage = await usersQueries.getLastMessage(phoneNumber);
-      console.log(lastMessage)
 
       const skipInactivityTracking =
         sessionService.isConnected(phoneNumber) ||
@@ -95,18 +94,79 @@ class FlowRouter {
       // ============================================
       // STEP 0.6: Handle image uploads during post-session photo flow
       // ============================================
+   
       if (
         lastMessage?.flow === "post_session_upload" &&
         message.type === "image"
       ) {
         const lastMsg = await usersQueries.getLastMessage(phoneNumber);
         const ctx = lastMsg?.context || {};
+
+        if (ctx.ignoreAlbumImages) {
+          const receivedCount =
+            await usersQueries.incrementReceivedImageCount(phoneNumber);
+
+          Logger.info("Ignoring album image", {
+            phoneNumber,
+            receivedCount,
+            expectedImageCount: ctx.expectedImageCount,
+          });
+
+          if (receivedCount >= ctx.expectedImageCount) {
+            Logger.info(
+              "All rejected album images received — resetting state",
+              {
+                phoneNumber,
+                receivedCount,
+                expectedImageCount: ctx.expectedImageCount,
+              },
+            );
+            await usersQueries.updateLastMessage(phoneNumber, {
+              flow: "post_session_upload",
+              step: 2,
+              context: {
+                sessionId: ctx.sessionId,
+                profileId: ctx.profileId,
+                flowName: ctx.flowName,
+                language: ctx.language,
+                uploadCount: 0,
+                storyId: ctx.storyId || null,
+                expectedImageCount: 0,
+                ignoreAlbumImages: false,
+                receivedImageCount: 0,
+                uploadDoneTriggered: false,
+              },
+              text: "upload_yes",
+            });
+          }
+
+          return { success: true, handled: true, route: "album-image-ignored" };
+        }
+
+        // expectedImageCount 0 means album header either hasn't written yet
+        // or wrote 0 (malformed). Either way don't process as a real upload.
+        if (!ctx.expectedImageCount && lastMsg?.text === "album_start") {
+          Logger.warn(
+            "Image arrived with no expectedImageCount — likely before album header wrote or malformed album",
+            {
+              phoneNumber,
+              ctx,
+            },
+          );
+          return {
+            success: true,
+            handled: true,
+            route: "album-image-no-header",
+          };
+        }
+
         if (!ctx.expectedImageCount) {
           await usersQueries.updateLastMessage(phoneNumber, {
             ...lastMsg,
             context: { ...ctx, expectedImageCount: 1 },
           });
         }
+
         return await storyPostSessionService.handlePhotoUpload(
           phoneNumber,
           message,
@@ -250,7 +310,7 @@ class FlowRouter {
 
           await whatsappService.sendMessage(
             phoneNumber,
-            `✏️ ${selectedLanguageText.voiceEditPrompt}`,
+            `${selectedLanguageText.voiceEditPrompt}`,
           );
 
           Logger.info("voice_edit: waiting for user to type correction", {
@@ -269,7 +329,7 @@ class FlowRouter {
 
           await whatsappService.sendMessage(
             phoneNumber,
-            `🔄 ${selectedLanguageText.voiceRetryPrompt}`,
+            `${selectedLanguageText.voiceRetryPrompt}`,
           );
 
           Logger.info("voice_retry: user asked to resend voice note", {
@@ -291,7 +351,7 @@ class FlowRouter {
 
           await whatsappService.sendMessage(
             phoneNumber,
-            `📷 ${selectedLanguageText.evidenceLimit}\n\n` +
+            `${selectedLanguageText.evidenceLimit}\n\n` +
               `${selectedLanguageText.limitCount}`,
           );
           return { success: true, handled: true };
@@ -301,7 +361,7 @@ class FlowRouter {
         if (selectedAction === "post_upload_more") {
           await whatsappService.sendMessage(
             phoneNumber,
-            `📷 ${selectedLanguageText.requestNextPhoto}`,
+            `📷${selectedLanguageText.requestNextPhoto}`,
           );
           return { success: true, handled: true };
         }
@@ -571,12 +631,29 @@ class FlowRouter {
       if (result.success) {
         // Wait for Mohini auth ack before returning so the next
         // user message hits a ready WS
+
         const ws = sessionService.getActiveWs(phoneNumber);
         if (ws?._mohiniReady) {
           await Promise.race([
             ws._mohiniReady,
             new Promise((resolve) => setTimeout(resolve, 5000)),
           ]);
+        }
+
+        const user = await usersQueries.findOne(
+          { phoneNumber },
+          { lastMessage: 1 },
+        );
+
+        const lastMessage = user?.lastMessage;
+        if (
+          lastMessage?.context?.mohiniSource === "bot" &&
+          lastMessage?.context?.lastBotMsg
+        ) {
+          await whatsappService.sendMessage(
+            phoneNumber,
+            lastMessage.context.lastBotMsg,
+          );
         }
       } else {
         // Could not reconnect – show main menu

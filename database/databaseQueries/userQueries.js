@@ -213,4 +213,12 @@ static async updateLastMessageAtomic(phoneNumber, filter, update) {
     update
   );
 }
+static async incrementReceivedImageCount(phoneNumber) {
+  const result = await database.models.user.findOneAndUpdate(
+    { phoneNumber },
+    { $inc: { "lastMessage.context.receivedImageCount": 1 } },
+    { new: true, projection: { "lastMessage.context.receivedImageCount": 1 } }
+  );
+  return result?.lastMessage?.context?.receivedImageCount ?? 1;
+}
 }

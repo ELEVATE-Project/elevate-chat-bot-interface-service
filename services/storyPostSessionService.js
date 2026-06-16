@@ -17,7 +17,7 @@ const {
 const sessionService = require("./sessionService");
 const MOHINI_BASE_URL = process.env.BACKEND_API_URL;
 
-const MAX_PHOTOS = 10;
+const MAX_PHOTOS = 3;
 
 class StoryPostSessionService {
   constructor() {
@@ -36,6 +36,10 @@ class StoryPostSessionService {
   // ─────────────────────────────────────────────────────────────────
   async startPostSession(phoneNumber, sessionOverride = null) {
     try {
+
+        this.cancelUploadDoneTimer(phoneNumber);
+         this._uploadDoneInProgress.delete(phoneNumber);
+
       let session = sessionOverride;
 
       if (!session?.sessionId) {
@@ -266,6 +270,16 @@ class StoryPostSessionService {
       const lastMsg = await usersQueries.getLastMessage(phoneNumber);
       const ctx = lastMsg?.context || {};
 
+      // const uploadCount = ctx.uploadCount ?? 0;
+      // if (uploadCount === 0 && lastMsg?.text !== "post_upload_skip") {
+      //   Logger.warn("handleUploadDone called with 0 uploads — skipping", {
+      //     phoneNumber,
+      //     flow: lastMsg?.flow,
+      //     text: lastMsg?.text,
+      //   });
+      //   return { success: false, handled: true };
+      // }
+
       const mediaType = message.type;
       const mediaId = message[mediaType]?.id;
       const mimeType =
@@ -289,6 +303,8 @@ class StoryPostSessionService {
       // ── Step 1: Download from WhatsApp (memory only, no disk write) ──
       const buffer = await this._downloadWhatsAppImageToBuffer(mediaId);
       if (!buffer) {
+          Logger.error("Buffer download failed", { phoneNumber, mediaId, mediaType });
+
         await whatsappService.sendMessage(
           phoneNumber,
           `❌ ${selectedLanguageText.imageDownloadError}`,
@@ -852,8 +868,6 @@ class StoryPostSessionService {
     }
   }
 
- 
-
   async _downloadWhatsAppImage(mediaId, fileName) {
     try {
       const response = await whatsappService.getMedia(mediaId);
@@ -972,6 +986,15 @@ class StoryPostSessionService {
 
     this._uploadDoneTimers.set(phoneNumber, timer);
   }
+
+  async cancelUploadDoneTimer(phoneNumber) {
+  const timer = this._uploadDoneTimers.get(phoneNumber);
+  if (timer) {
+    clearTimeout(timer);
+    this._uploadDoneTimers.delete(phoneNumber);
+    Logger.info("Upload done timer cancelled", { phoneNumber });
+  }
+}
 }
 
 module.exports = new StoryPostSessionService();
