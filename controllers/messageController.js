@@ -13,6 +13,7 @@ const storyPostSessionService = require("../services/storyPostSessionService");
 const languageService = require("../services/languageService");
 const MOHINI_BASE_URL = process.env.BACKEND_API_URL;
 const { randomUUID } = require("crypto");
+const MAX_PHOTOS = 3;
 
 class MessageController {
   /**
@@ -32,28 +33,92 @@ class MessageController {
       if (message.type === "action") {
         return { success: false, handled: true, route: "unsupported" };
       }
-      
-      const keys = ["whatsappNotSupported", "notUnderstood","editNotSupported"];
+
+      const keys = [
+        "whatsappNotSupported",
+        "notUnderstood",
+        "editNotSupported",
+        "maxImagesExceeded",
+      ];
       const selectedLanguageText = await languageService.tBatch(
         phoneNumber,
         keys,
       );
       // Ignore album header — individual images arrive as separate messages
+    
       if (message.type === "album") {
+        storyPostSessionService.cancelUploadDoneTimer(phoneNumber);
+
         const expectedCount = message.album?.expectedImageCount || 0;
-        // Store expected count in lastMessage context
+
+        Logger.info("Album header received", {
+          phoneNumber,
+          expectedCount,
+          albumRaw: message.album,
+        });
+
+        if (expectedCount === 0) {
+          Logger.warn("Album header with 0 expectedImageCount — ignoring", {
+            phoneNumber,
+          });
+          return { success: true, handled: true, route: "album-header-empty" };
+        }
+
         const lastMsg = await usersQueries.getLastMessage(phoneNumber);
         const ctx = lastMsg?.context || {};
+
+        // ── Duplicate check: same album resent ──────────────────────────
+        if (ctx.ignoreAlbumImages && ctx.expectedImageCount === expectedCount) {
+          Logger.info("Duplicate album header ignored", {
+            phoneNumber,
+            expectedCount,
+          });
+          return {
+            success: true,
+            handled: true,
+            route: "album-header-duplicate",
+          };
+        }
+
+        if (expectedCount > MAX_PHOTOS) {
+          await whatsappService.sendMessage(
+            phoneNumber,
+            `⚠️ ${selectedLanguageText.maxImagesExceeded}`,
+          );
+          await usersQueries.updateLastMessage(phoneNumber, {
+            flow: "post_session_upload",
+            step: 2,
+            context: {
+              ...ctx,
+              expectedImageCount: expectedCount,
+              ignoreAlbumImages: true,
+              receivedImageCount: 0,
+            },
+            text: "album_start",
+          });
+          return {
+            success: true,
+            handled: true,
+            route: "album-header-rejected",
+          };
+        }
+
+        // header must clear the stale flag so uploads can proceed.
         await usersQueries.updateLastMessage(phoneNumber, {
           flow: "post_session_upload",
           step: 2,
-          context: { ...ctx, expectedImageCount: expectedCount },
+          context: {
+            ...ctx,
+            expectedImageCount: expectedCount,
+            ignoreAlbumImages: false, 
+            receivedImageCount: 0,
+            uploadDoneTriggered: false,
+          },
           text: "album_start",
         });
 
         return { success: true, handled: true, route: "album-header" };
       }
-
 
       //ignore message type edited
       if (message.type === "edited" || message.edited) {
@@ -68,8 +133,6 @@ class MessageController {
         return { success: true, handled: true, route: "edited-ignored" };
       }
       whatsappService.sendTyping(phoneNumber);
-
-      
 
       // ──────────────────────────────────────────────────────────────
       // STEP 0 : Auto-reconnect after server restar
@@ -174,77 +237,86 @@ class MessageController {
   // ──────────────────────────────────────────────────────────────────
   // STEP 0 impl: Auto-reconnect when server restarted
   // ──────────────────────────────────────────────────────────────────
- static async autoReconnectIfNeeded(phoneNumber) {
-  try {
-    const user = await usersQueries.findOne({ phoneNumber });
-    const storedSession = user?.scope?.activeSession;
+  static async autoReconnectIfNeeded(phoneNumber) {
+    try {
+      const user = await usersQueries.findOne({ phoneNumber });
+      const storedSession = user?.scope?.activeSession;
 
-    if (!storedSession?.sessionId) return;
+      if (!storedSession?.sessionId) return;
 
-    // ── Don't reconnect during post-session flows ─────────────────
-    // If activeSession wasn't cleaned up properly but we're already
-    // in post_session_upload/report, reconnecting would break the flow.
-    const lastMsg = await usersQueries.getLastMessage(phoneNumber);
-    if (
-      lastMsg?.flow === "post_session_upload" ||
-      lastMsg?.flow === "post_session_report"
-    ) {
-      Logger.info("autoReconnectIfNeeded: skipping – in post-session flow", {
-        phoneNumber,
-        flow: lastMsg.flow,
-      });
-      // Clean up the stale activeSession so this never fires again
-      await usersQueries.update(
-        { phoneNumber },
-        { $unset: { "scope.activeSession": "" } }
-      ).catch(() => {});
-      return;
-    }
-
-    Logger.info("MessageController: Stored session found but no live WS – reconnecting", {
-      phoneNumber,
-      sessionId: storedSession.sessionId,
-      createdAt: storedSession.createdAt,
-    });
-
-    const result = await sessionService.reconnect(phoneNumber);
-
-    if (result.success) {
-      Logger.info("MessageController: Auto-reconnect succeeded – waiting for Mohini auth", {
-        phoneNumber,
-      });
-
-      const ws = sessionService.getActiveWs(phoneNumber);
-      if (ws?._mohiniReady) {
-        await Promise.race([
-          ws._mohiniReady,
-          new Promise((resolve) =>
-            setTimeout(() => {
-              Logger.warn("MessageController: Mohini auth wait timed out – proceeding anyway", {
-                phoneNumber,
-              });
-              resolve();
-            }, 5000)
-          ),
-        ]);
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+      // If activeSession wasn't cleaned up properly but we're already
+      // in post_session_upload/report, reconnecting would break the flow.
+      const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+      if (
+        lastMsg?.flow === "post_session_upload" ||
+        lastMsg?.flow === "post_session_report"
+      ) {
+        Logger.info("autoReconnectIfNeeded: skipping – in post-session flow", {
+          phoneNumber,
+          flow: lastMsg.flow,
+        });
+        // Clean up the stale activeSession so this never fires again
+        await usersQueries
+          .update({ phoneNumber }, { $unset: { "scope.activeSession": "" } })
+          .catch(() => {});
+        return;
       }
 
-      Logger.info("MessageController: WS ready – forwarding user message", { phoneNumber });
-    } else {
-      Logger.warn("MessageController: Auto-reconnect failed", {
+      Logger.info(
+        "MessageController: Stored session found but no live WS – reconnecting",
+        {
+          phoneNumber,
+          sessionId: storedSession.sessionId,
+          createdAt: storedSession.createdAt,
+        },
+      );
+
+      const result = await sessionService.reconnect(phoneNumber);
+
+      if (result.success) {
+        Logger.info(
+          "MessageController: Auto-reconnect succeeded – waiting for Mohini auth",
+          {
+            phoneNumber,
+          },
+        );
+
+        const ws = sessionService.getActiveWs(phoneNumber);
+        if (ws?._mohiniReady) {
+          await Promise.race([
+            ws._mohiniReady,
+            new Promise((resolve) =>
+              setTimeout(() => {
+                Logger.warn(
+                  "MessageController: Mohini auth wait timed out – proceeding anyway",
+                  {
+                    phoneNumber,
+                  },
+                );
+                resolve();
+              }, 5000),
+            ),
+          ]);
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+
+        Logger.info("MessageController: WS ready – forwarding user message", {
+          phoneNumber,
+        });
+      } else {
+        Logger.warn("MessageController: Auto-reconnect failed", {
+          phoneNumber,
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      Logger.error("MessageController: autoReconnectIfNeeded error", {
         phoneNumber,
-        error: result.error,
+        error: error.message,
       });
     }
-  } catch (error) {
-    Logger.error("MessageController: autoReconnectIfNeeded error", {
-      phoneNumber,
-      error: error.message,
-    });
   }
-}
 
   // ──────────────────────────────────────────────────────────────────
   // Forward message to the active Mohini WS session
@@ -263,6 +335,7 @@ class MessageController {
         "voiceSend",
         "voiceEdit",
         "voiceRetry",
+        "emptyRecording",
       ];
       const selectedLanguageText = await languageService.tBatch(
         phoneNumber,
@@ -332,7 +405,7 @@ class MessageController {
           flowName,
         );
 
-        if (!result?.transcript) {
+        if (result?.transcript === undefined || result?.transcript === null) {
           await whatsappService.sendMessage(
             phoneNumber,
             `❌ ${selectedLanguageText.notUnderstood}`,
@@ -341,6 +414,19 @@ class MessageController {
             success: false,
             handled: true,
             route: "ws-transcription-failed",
+          };
+        }
+
+        if (!result.transcript?.trim()) {
+          // ASR succeeded but heard nothing — empty/silent voice note
+          await whatsappService.sendMessage(
+            phoneNumber,
+            `🎙️ ${selectedLanguageText.emptyRecording}`,
+          );
+          return {
+            success: false,
+            handled: true,
+            route: "ws-transcription-empty",
           };
         }
 
@@ -534,9 +620,9 @@ class MessageController {
         },
       );
 
-      const transcript = asrResp.data?.transcript || asrResp.data?.text;
+      const transcript = asrResp.data?.transcript ?? asrResp.data?.text;
       Logger.info("Transcription complete", { phoneNumber, transcript });
-      if (!transcript) return null;
+      if (transcript === undefined || transcript === null) return null;
 
       return { transcript, s3AudioUrl };
     } catch (error) {

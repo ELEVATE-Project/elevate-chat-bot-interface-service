@@ -698,7 +698,7 @@ class SessionService {
       type: "button",
       body: {
         text:
-          `⚠️ ${selectedLanguageText.sessionDiscontinue}.\n\n` +
+          `${selectedLanguageText.sessionDiscontinue}.\n\n` +
           `${selectedLanguageText.reconnectMessage}.\n\n`,
       },
       action: {

@@ -34,7 +34,7 @@ const LANGUAGE_MESSAGE = {
     yesUpload: "Yes, Upload",
     evidenceLimit:
       "📸 You can upload one or more images. Once you send them, you won’t be able to add more images.",
-    limitCount: "📤 You can upload up to:10 image",
+    limitCount: "📤 You can upload up to:3 image",
     done: "Type *done* when you have finished uploading.",
     requestNextPhoto: "Please send your next photo.",
     lostSession: "Session lost. Please type 'Hi' to start again.",
@@ -47,7 +47,9 @@ const LANGUAGE_MESSAGE = {
     whatsappNotSupported:
       "Sorry, I can only handle text, voice, images, and interactive messages",
     notUnderstood:
-      "Sorry, didn't understand that. Please type 'Hi' to see options or 'Menu' to see the main menu.",
+      "Sorry, I couldn’t quite understand that. Please record your response again or send it as text to continue.",
+    emptyRecording:
+      "It looks like the recording was empty. Please send a valid voice message or type your response to continue.",
     audioDownloadError: "Could not download the audio. Please try again.",
     wsSessionRequired:
       "Please respond with text/audio during an active session.",
@@ -77,6 +79,8 @@ const LANGUAGE_MESSAGE = {
     seeYouSoon: "👋 We hope to see you again soon! 🌟",
     editNotSupported:
       "✏️ Message editing isn't supported during an active session. Please send a new message to continue.",
+    maxImagesExceeded:
+      "📸 You can upload a maximum of 3 images at a time. Please send fewer images.",
   },
   kn: {
     conversationStartMessage:
@@ -108,7 +112,7 @@ const LANGUAGE_MESSAGE = {
     addMorePhotos: "ಇನ್ನಷ್ಟು ಫೋಟೋಗಳು/ವೀಡಿಯೊಗಳನ್ನು ಸೇರಿಸಿ",
     reportGenerationMessage:
       "ಫೋಟೋಗಳನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಲಾಗಿದೆ! ನಿಮ್ಮ ವರದಿಯನ್ನು ರಚಿಸಲಾಗುತ್ತಿದೆ...",
-    downloadorEditReport: "ನೀವು ವರದಿಯನ್ನು ಡೌನ್‌ಲೋಡ್ ಮಾಡಬೇಕೆಂದು ಬಯಸುವಿರಾ?",
+    downloadorEditReport: "ನೀವು ವರದಿಯನ್ನು ಡೌನ್‌ಲೋಡ್ ಮಾಡಲು ಬಯಸುವಿರಾ?",
     reportRetrievalError:
       "ನಿಮ್ಮ ವರದಿಯನ್ನು ಹಿಂಪಡೆಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಪುನಃ ಪ್ರಯತ್ನಿಸಿ.",
     editReportText: "*ನಿಮ್ಮ ವರದಿಯನ್ನು ಸಂಪಾದಿಸಿ",
@@ -117,7 +121,7 @@ const LANGUAGE_MESSAGE = {
     yesUpload: "ಹೌದು, ಅಪ್‌ಲೋಡ್ ಮಾಡಿ",
     evidenceLimit:
       "📸 ನೀವು ಒಂದು ಅಥವಾ ಹೆಚ್ಚು ಚಿತ್ರಗಳನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಬಹುದು. ನೀವು ಅವುಗಳನ್ನು ಕಳುಹಿಸಿದ ನಂತರ, ನೀವು ಇನ್ನಷ್ಟು ಚಿತ್ರಗಳನ್ನು ಸೇರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
-    limitCount: "📤 ನೀವು ಇಷ್ಟು ಅಪ್‌ಲೋಡ್ ಮಾಡಬಹುದು:10 ಚಿತ್ರ",
+    limitCount: "📤 ನೀವು ಇಷ್ಟು ಅಪ್‌ಲೋಡ್ ಮಾಡಬಹುದು:3 ಚಿತ್ರ",
     done: "ಅಪ್‌ಲೋಡ್ ಮಾಡುವುದನ್ನು ಮುಗಿಸಿದಾಗ *done* ಎಂದು ಟೈಪ್ ಮಾಡಿ.",
     requestNextPhoto: "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಮುಂದಿನ ಫೋಟೋವನ್ನು ಕಳುಹಿಸಿ.",
     lostSession:
@@ -132,8 +136,8 @@ const LANGUAGE_MESSAGE = {
       "ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಪುನಃ ಪ್ರಯತ್ನಿಸಿ.",
     whatsappNotSupported:
       "ಕ್ಷಮಿಸಿ, ನಾನು ಕೇವಲ ಪಠ್ಯ, ಧ್ವನಿ, ಚಿತ್ರಗಳು ಮತ್ತು ಸಂವಾದಾತ್ಮಕ ಸಂದೇಶಗಳನ್ನು ಮಾತ್ರ ನಿಭಾಯಿಸಬಲ್ಲೆ",
-    notUnderstood:
-      "ಕ್ಷಮಿಸಿ, ಅದು ಅರ್ಥವಾಗಲಿಲ್ಲ. ಆಯ್ಕೆಗಳನ್ನು ನೋಡಲು ದಯವಿಟ್ಟು 'Hi' ಎಂದು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮುಖ್ಯ ಮೆನು ನೋಡಲು 'Menu' ಟೈಪ್ ಮಾಡಿ.",
+    notUnderstood:"ಕ್ಷಮಿಸಿ, ನನಗೆ ಅದು ಸರಿಯಾಗಿ ಅರ್ಥವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಮತ್ತೆ ರೆಕಾರ್ಡ್ ಮಾಡಿ ಅಥವಾ ಮುಂದುವರೆಯಲು ಅದನ್ನು ಪಠ್ಯವಾಗಿ (text) ಕಳುಹಿಸಿ.",
+    emptyRecording:"ನಿಮ್ಮ ರೆಕಾರ್ಡಿಂಗ್ ಖಾಲಿ ಇರುವಂತೆ ತೋರುತ್ತಿದೆ. ದಯವಿಟ್ಟು ಸರಿಯಾದ ಧ್ವನಿ ಸಂದೇಶವನ್ನು ಕಳುಹಿಸಿ ಅಥವಾ ಮುಂದುವರೆಯಲು ನಿಮ್ಮ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.",
     audioDownloadError:
       "ಆಡಿಯೊವನ್ನು ಡೌನ್‌ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.",
     wsSessionRequired:
@@ -195,8 +199,7 @@ const LANGUAGE_MESSAGE = {
     addMorePhotos: "और फ़ोटो/वीडियो जोड़ें",
     reportGenerationMessage:
       "फ़ोटो अपलोड हो गईं! आपकी रिपोर्ट तैयार की जा रही है...",
-    downloadorEditReport:
-      "क्या आप रिपोर्ट डाउनलोड करना चाहेंगे या उसे संपादित करना चाहेंगे?",
+    downloadorEditReport: "क्या आप रिपोर्ट डाउनलोड करना चाहेंगे?",
     reportRetrievalError:
       "आपकी रिपोर्ट प्राप्त नहीं की जा सकी। कृपया पुनः प्रयास करें।",
     editReportText: "*अपनी रिपोर्ट संपादित करें",
@@ -205,7 +208,7 @@ const LANGUAGE_MESSAGE = {
     yesUpload: "हाँ, अपलोड करें",
     evidenceLimit:
       "📸 आप एक या अधिक छवियां अपलोड कर सकते हैं। एक बार जब आप उन्हें भेज देते हैं, तो आप और छवियां जोड़ नहीं पाएंगे।",
-    limitCount: "📤 आप यहाँ तक अपलोड कर सकते हैं:10 छवि",
+    limitCount: "📤 आप यहाँ तक अपलोड कर सकते हैं:3 छवि",
     done: "अपलोडिंग समाप्त करने पर *done* टाइप करें।",
     requestNextPhoto: "कृपया अपनी अगली फ़ोटो भेजें।",
     lostSession:
@@ -218,8 +221,8 @@ const LANGUAGE_MESSAGE = {
     imageUploadFailed: "छवि अपलोड करने में विफल। कृपया पुनः प्रयास करें।",
     whatsappNotSupported:
       "क्षमा करें, मैं केवल टेक्स्ट, वॉइस, चित्र और इंटरैक्टिव संदेश ही संभाल सकता हूँ",
-    notUnderstood:
-      "क्षमा करें, वह समझ में नहीं आया। कृपया विकल्प देखने के लिए 'Hi' या मुख्य मेनू देखने के लिए 'Menu' टाइप करें।",
+    notUnderstood:"माफ़ करें, मैं इसे ठीक से समझ नहीं सका। कृपया अपना जवाब फिर से रिकॉर्ड करें या जारी रखने के लिए इसे टेक्स्ट के रूप में भेजें।",
+    emptyRecording:"ऐसा लगता है कि रिकॉर्डिंग खाली थी। कृपया एक सही वॉइस मैसेज भेजें या जारी रखने के लिए अपना जवाब टाइप करें।",
     audioDownloadError:
       "ऑडियो डाउनलोड नहीं किया जा सका। कृपया अपना उत्तर टाइप करें।",
     wsSessionRequired:
@@ -291,7 +294,7 @@ const LANGUAGE_MESSAGE = {
     yesUpload: "అవును, అప్‌లోడ్ చేయండి",
     evidenceLimit:
       "📸 మీరు ఒకటి లేదా అంతకంటే ఎక్కువ చిత్రాలను అప్‌లోడ్ చేయవచ్చు. మీరు వాటిని పంపిన తర్వాత, మీరు మరిన్ని చిత్రాలను జోడించలేరు.",
-    limitCount: "📤 మీరు గరిష్టంగా అప్‌లోడ్ చేయవచ్చు:10 చిత్రం",
+    limitCount: "📤 మీరు గరిష్టంగా అప్‌లోడ్ చేయవచ్చు:3 చిత్రం",
     done: "అప్‌లోడ్ చేయడం పూర్తి చేసినప్పుడు *done* అని టైప్ చేయండి.",
     requestNextPhoto: "దయచేసి మీ తదుపరి ఫోటోను పంపండి.",
     lostSession:
@@ -307,8 +310,8 @@ const LANGUAGE_MESSAGE = {
       "చిత్రాన్ని అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.",
     whatsappNotSupported:
       "క్షమించండి, నేను టెక్స్ట్, వాయిస్, చిత్రాలు మరియు ఇంటరాక్టివ్ సందేశాలను మాత్రమే నిర్వహించగలను",
-    notUnderstood:
-      "క్షమించండి, నాకు అది అర్థం కాలేదు. దయచేసి ఎంపికలను చూడటానికి 'Hi' అని లేదా ప్రధాన మెనూని చూడటానికి 'Menu' అని టైప్ చేయండి.",
+    notUnderstood:"క్షమించండి, నాకు అది సరిగ్గా అర్థం కాలేదు. దయచేసి మీ సమాధానాన్ని మళ్లీ రికార్డ్ చేయండి లేదా కొనసాగించడానికి టెక్స్ట్‌గా పంపండి.",
+    emptyRecording:"రికార్డింగ్ ఖాళీగా ఉన్నట్లు అనిపిస్తోంది. దయచేసి సరైన వాయిస్ మెసేజ్ పంపండి లేదా కొనసాగించడానికి మీ సమాధానాన్ని టైప్ చేయండి.",
     audioDownloadError:
       "ఆడియోను డౌన్‌లోడ్ చేయడం సాధ్యపడలేదు. దయచేసి మీ ప్రతిస్పందనను టైప్ చేయండి.",
     wsSessionRequired:
