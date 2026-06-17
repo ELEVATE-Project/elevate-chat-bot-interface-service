@@ -49,7 +49,7 @@ const LANGUAGE_MESSAGE = {
     notUnderstood:
       "Sorry, I couldn’t quite understand that. Please record your response again or send it as text to continue.",
     emptyRecording:
-      "It looks like the recording was empty. Please send a valid voice message or type your response to continue.",
+      "We could not understand your voice message. Please try again by sending a clear voice note or text response.",
     audioDownloadError: "Could not download the audio. Please try again.",
     wsSessionRequired:
       "Please respond with text/audio during an active session.",
@@ -137,7 +137,7 @@ const LANGUAGE_MESSAGE = {
     whatsappNotSupported:
       "ಕ್ಷಮಿಸಿ, ನಾನು ಕೇವಲ ಪಠ್ಯ, ಧ್ವನಿ, ಚಿತ್ರಗಳು ಮತ್ತು ಸಂವಾದಾತ್ಮಕ ಸಂದೇಶಗಳನ್ನು ಮಾತ್ರ ನಿಭಾಯಿಸಬಲ್ಲೆ",
     notUnderstood:"ಕ್ಷಮಿಸಿ, ನನಗೆ ಅದು ಸರಿಯಾಗಿ ಅರ್ಥವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಮತ್ತೆ ರೆಕಾರ್ಡ್ ಮಾಡಿ ಅಥವಾ ಮುಂದುವರೆಯಲು ಅದನ್ನು ಪಠ್ಯವಾಗಿ (text) ಕಳುಹಿಸಿ.",
-    emptyRecording:"ನಿಮ್ಮ ರೆಕಾರ್ಡಿಂಗ್ ಖಾಲಿ ಇರುವಂತೆ ತೋರುತ್ತಿದೆ. ದಯವಿಟ್ಟು ಸರಿಯಾದ ಧ್ವನಿ ಸಂದೇಶವನ್ನು ಕಳುಹಿಸಿ ಅಥವಾ ಮುಂದುವರೆಯಲು ನಿಮ್ಮ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.",
+    emptyRecording:"ನಿಮ್ಮ ಧ್ವನಿ ಸಂದೇಶವನ್ನು ನಮಗೆ ಅರ್ಥಮಾಡಿಕೊಳ್ಳಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಸ್ಪಷ್ಟವಾದ ಧ್ವನಿ ಸಂದೇಶ ಅಥವಾ ಪಠ್ಯ ಸಂದೇಶವನ್ನು ಕಳುಹಿಸುವ ಮೂಲಕ ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.",
     audioDownloadError:
       "ಆಡಿಯೊವನ್ನು ಡೌನ್‌ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.",
     wsSessionRequired:
@@ -222,7 +222,7 @@ const LANGUAGE_MESSAGE = {
     whatsappNotSupported:
       "क्षमा करें, मैं केवल टेक्स्ट, वॉइस, चित्र और इंटरैक्टिव संदेश ही संभाल सकता हूँ",
     notUnderstood:"माफ़ करें, मैं इसे ठीक से समझ नहीं सका। कृपया अपना जवाब फिर से रिकॉर्ड करें या जारी रखने के लिए इसे टेक्स्ट के रूप में भेजें।",
-    emptyRecording:"ऐसा लगता है कि रिकॉर्डिंग खाली थी। कृपया एक सही वॉइस मैसेज भेजें या जारी रखने के लिए अपना जवाब टाइप करें।",
+    emptyRecording:"हम आपका वॉइस मैसेज नहीं समझ सके। कृपया एक स्पष्ट वॉइस नोट या टेक्स्ट संदेश भेजकर पुनः प्रयास करें।",
     audioDownloadError:
       "ऑडियो डाउनलोड नहीं किया जा सका। कृपया अपना उत्तर टाइप करें।",
     wsSessionRequired:
@@ -311,7 +311,7 @@ const LANGUAGE_MESSAGE = {
     whatsappNotSupported:
       "క్షమించండి, నేను టెక్స్ట్, వాయిస్, చిత్రాలు మరియు ఇంటరాక్టివ్ సందేశాలను మాత్రమే నిర్వహించగలను",
     notUnderstood:"క్షమించండి, నాకు అది సరిగ్గా అర్థం కాలేదు. దయచేసి మీ సమాధానాన్ని మళ్లీ రికార్డ్ చేయండి లేదా కొనసాగించడానికి టెక్స్ట్‌గా పంపండి.",
-    emptyRecording:"రికార్డింగ్ ఖాళీగా ఉన్నట్లు అనిపిస్తోంది. దయచేసి సరైన వాయిస్ మెసేజ్ పంపండి లేదా కొనసాగించడానికి మీ సమాధానాన్ని టైప్ చేయండి.",
+    emptyRecording:"మేము మీ వాయిస్ సందేశాన్ని అర్థం చేసుకోలేకపోయాము. దయచేసి స్పష్టమైన వాయిస్ నోట్ లేదా టెక్స్ట్ సందేశాన్ని పంపడం ద్వారా మళ్లీ ప్రయత్నించండి.",
     audioDownloadError:
       "ఆడియోను డౌన్‌లోడ్ చేయడం సాధ్యపడలేదు. దయచేసి మీ ప్రతిస్పందనను టైప్ చేయండి.",
     wsSessionRequired:
