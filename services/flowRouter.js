@@ -96,7 +96,8 @@ class FlowRouter {
       // ============================================
    
       if (
-        lastMessage?.flow === "post_session_upload" &&
+        (lastMessage?.flow === "post_session_upload" ||
+          lastMessage?.flow === "post_session_report") &&
         message.type === "image"
       ) {
         const lastMsg = await usersQueries.getLastMessage(phoneNumber);
@@ -106,7 +107,7 @@ class FlowRouter {
           const receivedCount =
             await usersQueries.incrementReceivedImageCount(phoneNumber);
 
-          Logger.info("Ignoring album image", {
+          Logger.info("Ignoring album image (over-limit)", {
             phoneNumber,
             receivedCount,
             expectedImageCount: ctx.expectedImageCount,
@@ -143,15 +144,11 @@ class FlowRouter {
           return { success: true, handled: true, route: "album-image-ignored" };
         }
 
-        // expectedImageCount 0 means album header either hasn't written yet
-        // or wrote 0 (malformed). Either way don't process as a real upload.
+        // expectedImageCount=0 means album header hasn't written yet or is malformed
         if (!ctx.expectedImageCount && lastMsg?.text === "album_start") {
           Logger.warn(
             "Image arrived with no expectedImageCount — likely before album header wrote or malformed album",
-            {
-              phoneNumber,
-              ctx,
-            },
+            { phoneNumber, ctx },
           );
           return {
             success: true,

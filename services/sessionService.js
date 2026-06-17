@@ -881,55 +881,59 @@ class SessionService {
     }
   }
 
+ 
+  //  Handle extra_content alongside a bot message
+  // ─────────────────────────────────────────────────────────────────
+  
   async _handleSessionEnd(phoneNumber) {
-    if (this._sessionEndInProgress.has(phoneNumber)) return;
+  if (this._sessionEndInProgress.has(phoneNumber)) return;
 
-    try {
-      const user = await usersQueries.findOne({ phoneNumber });
-      const session = user?.scope?.activeSession;
-      if (!session?.sessionId) return;
+  try {
+    const user = await usersQueries.findOne({ phoneNumber });
+    const session = user?.scope?.activeSession;
+    if (!session?.sessionId) return;
 
-      if (
-        user?.scope?.wsSession?.awaitingReconnectResponse ||
-        user?.scope?.wsSession?.awaitingInactivityResponse
-      ) {
-        return;
-      }
-
-      const isCompleted = await this.checkSessionCompleted(session.sessionId);
-      if (!isCompleted) return;
-
-      this._sessionEndInProgress.add(phoneNumber);
-
-      Logger.info(
-        "_handleSessionEnd: session COMPLETED – starting post-session",
-        {
-          phoneNumber,
-          sessionId: session.sessionId,
-        },
-      );
-
-      await usersQueries
-        .update({ phoneNumber }, { $unset: { "scope.activeSession": "" } })
-        .catch(() => {});
-
-      // we are the ones closing it after a confirmed COMPLETED session.
-      const ws = activeConnections.get(phoneNumber);
-      if (ws) ws._intentionalClose = true;
-
-      await this.closeConnection(phoneNumber);
-
-      const storyPostSessionService = require("./storyPostSessionService");
-      await storyPostSessionService.startPostSession(phoneNumber, session);
-    } catch (err) {
-      Logger.error("_handleSessionEnd error", {
-        phoneNumber,
-        err: err.message,
-      });
-    } finally {
-      this._sessionEndInProgress.delete(phoneNumber);
+    if (
+      user?.scope?.wsSession?.awaitingReconnectResponse ||
+      user?.scope?.wsSession?.awaitingInactivityResponse
+    ) {
+      return;
     }
+
+    const isCompleted = await this.checkSessionCompleted(session.sessionId);
+    if (!isCompleted) return;
+
+    this._sessionEndInProgress.add(phoneNumber);
+
+    Logger.info("_handleSessionEnd: session COMPLETED – starting post-session", {
+      phoneNumber,
+      sessionId: session.sessionId,
+    });
+
+    await usersQueries
+      .update({ phoneNumber }, { $unset: { "scope.activeSession": "" } })
+      .catch(() => {});
+
+    const ws = activeConnections.get(phoneNumber);
+    if (ws) ws._intentionalClose = true;
+
+    await this.closeConnection(phoneNumber);
+
+    // Small delay so any in-flight isConnected() checks complete
+    // before images start arriving
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const storyPostSessionService = require("./storyPostSessionService");
+    await storyPostSessionService.startPostSession(phoneNumber, session);
+  } catch (err) {
+    Logger.error("_handleSessionEnd error", {
+      phoneNumber,
+      err: err.message,
+    });
+  } finally {
+    this._sessionEndInProgress.delete(phoneNumber);
   }
+}
 
   // PRIVATE: Handle extra_content alongside a bot message
   // ─────────────────────────────────────────────────────────────────
