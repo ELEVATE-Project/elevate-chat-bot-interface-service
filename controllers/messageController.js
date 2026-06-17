@@ -161,7 +161,25 @@ class MessageController {
       //         ALL non-interactive messages straight to the WS.
       // ──────────────────────────────────────────────────────────────
       if (sessionService.isConnected(phoneNumber)) {
-        return await this.forwardToActiveSession(message, phoneNumber);
+        // don't intercept images destined for the post-session upload
+        if (message.type === "image") {
+          const lastMsg = await usersQueries.getLastMessage(phoneNumber);
+          const inUploadFlow =
+            lastMsg?.flow === "post_session_upload" ||
+            lastMsg?.flow === "post_session_report";
+
+          if (inUploadFlow) {
+            Logger.info(
+              "MessageController: image arrived during post-session flow – skipping WS intercept",
+              { phoneNumber, flow: lastMsg.flow },
+            );
+            // Fall through to STEP 6 (flowRouter media) below
+          } else {
+            return await this.forwardToActiveSession(message, phoneNumber);
+          }
+        } else {
+          return await this.forwardToActiveSession(message, phoneNumber);
+        }
       }
 
       // ──────────────────────────────────────────────────────────────
