@@ -4,7 +4,7 @@
 // ============================================
 class Logger {
     static info(message, data = {}) {
-      console.log(`[INFO] ${new Date().toISOString()} - ${message}`, data);
+      // console.log(`[INFO] ${new Date().toISOString()} - ${message}`, data);
     }
   
     static error(message, error = {}) {
@@ -21,7 +21,7 @@ class Logger {
   
     static debug(message, data = {}) {
       if (process.env.NODE_ENV === 'development') {
-        console.debug(`[DEBUG] ${new Date().toISOString()} - ${message}`, data);
+        // console.debug(`[DEBUG] ${new Date().toISOString()} - ${message}`, data);
       }
     }
   }
